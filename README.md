@@ -1,8 +1,17 @@
 # rclswi: a SWI-Prolog client for ROS2
 
+__WARNING__
+
+> This is not (yet)  a  useful  ROS2   client.  Currently  it  can  only
+> subscribe to a topic and  handle  messages   on  this  topic  with the
+> exception of those holding dynamic arrays.
+>
+> We plan to turn this into a full   client. If you want to help, please
+> have a look at the TODO list at the end of this README.
+
 ## Building
 
- - Make sure to have SWI-Prolog installed (8.3.19)
+ - Make sure to have SWI-Prolog installed (8.3.19 or later)
  - clone into `src` below your ROS2 workspace
  - Build using `colcon build`
 
@@ -125,8 +134,11 @@ type introspection.  Missing:
   - Type handling
     - Convert message from C to Prolog
       - Deal with arrays
+        - [x] Fixed arrays
+	- Dynamic arrays
       - Deal with wide strings (are these UTF-16?)
     - Convert message from Prolog to C
+      See https://github.com/osrf/dynamic_message_introspection
     - At the moment dict key names are created on the fly from the
       type introspection data.  This is needlessly slow.
     - Should we allow the user to tweak the conversion by
