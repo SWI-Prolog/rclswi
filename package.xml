@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format2.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="2">
+  <name>rclswi</name>
+  <version>0.0.0</version>
+  <description>Package containing the SWI-Prolog client.</description>
+
+  <maintainer email="jan@swi-prolog.org">Jan Wielemaker</maintainer>
+
+  <license>BSD-2</license>
+
+  <author email="jan@swi-prolog.org">Jan Wielemaker</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>rcutils</build_depend>
+  <build_depend>rmw_implementation_cmake</build_depend>
+
+  <depend>rmw_implementation</depend>
+  <depend>rcl</depend>
+  <depend>rcl_action</depend>
+  <depend>rcl_yaml_param_parser</depend>
+  <depend>unique_identifier_msgs</depend>
+
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>rpyutils</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

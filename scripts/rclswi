@@ -1,0 +1,20 @@
+#!/bin/bash
+
+PL_ARGS=$@
+RCLSWI="$(ros2 pkg prefix rclswi)"
+PL_INIT_FILE=$RCLSWI/prolog/ros.pl
+SCRIPT_FILE=""
+
+#if [ -n "$1" ] && [ -n "$(ros pkg prefix $1)" ]; then
+#    if [ -f $(rospack find $1)/src/__init__.pl ]; then
+#        SCRIPT_FILE="-g register_ros_package($1)"
+#    fi
+#    PL_ARGS=${@:1}
+#fi
+#
+#if [ -n "$2" ]; then
+#    SCRIPT_FILE=$SCRIPT_FILE",$2"
+#fi
+
+#exec /usr/bin/swipl ${PL_INIT_FILE} ${SCRIPT_FILE} ${PL_ARGS}
+exec /home/janw/bin/swipl -p foreign=$RCLSWI/lib ${PL_INIT_FILE} ${SCRIPT_FILE}
