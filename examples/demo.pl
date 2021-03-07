@@ -7,7 +7,8 @@
             py_listener/0,
 
             ros_current_topic/2,        % ?Topic,?Type
-            ros_type_introspection/2    % +Type, -Description
+            ros_type_introspection/2,   % +Type, -Description
+            py_talker/0
           ]).
 
 /** <module> Demo rclswi
@@ -46,9 +47,9 @@ readability).
                           sec:int32}}.
 */
 
-% Load the ROS library
+% Load the ROS library and make it available at the toplevel
 
-:- use_module(install/rclswi/prolog/ros).
+:- reexport(install/rclswi/prolog/ros).
 
 % This can be used to define the default   node. If this is not done the
 % node will be called  swi_prolog_NNN,  where   NNN  is  a  large random
@@ -114,3 +115,25 @@ py_listener :-
 
 on_py(Message) :-
     format('Heart ~p~n', [Message]).
+
+
+		 /*******************************
+		 *           PUBLISHING		*
+		 *******************************/
+
+%!  py_talker
+%
+%   Publish a string to `/topic` every second. This is the same as the
+%   node below started from the Python pub/sub tutorial.
+%
+%       ros2 run py_pubsub talker
+
+py_talker :-
+    ros_publisher('/topic',
+                  [ message_type('std_msgs/msg/String')
+                  ]),
+    between(1, infinite, I),
+    format(string(Msg), 'Hello World ~d', [I]),
+    ros_publish('/topic', _{data: Msg}),
+    sleep(1),
+    fail.

@@ -22,6 +22,9 @@
             ros_subscribe/3,            % +Topic, :CallBack, +Options
             ros_unsubscribe/1,          % +Topic
 
+            ros_publish/2,              % +Topic, +Message
+            ros_publisher/2,            % +Topic, +Options
+
             ros_current_topic/2,        % ?Topic,?Type
             ros_type_introspection/2,   % +Type, -Description
 
@@ -30,7 +33,7 @@
             ros_create_node/4,          % +Context, +Name, -Node, +Options
             ros_node_property/2,        % +Node,?Property
 
-            ros_publish/5,              % +Node, +MsgType, +Topic, +QoSProfile, -Publisher
+            ros_publisher/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Publisher
             ros_subscribe/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Subscription
 
             ros_wait/3,                 % +WaitSet, +TimeOut, -Ready
@@ -41,7 +44,9 @@
             ros_property/1,             % ?Property
             ros_debug/1,                % +Level
             ros_default_context/1,      % -Context
-            ros_default_node/1          % -Node
+            ros_default_node/1,         % -Node
+
+            ros_identifier_prolog/2     % ?RosName, ?PrologName
           ]).
 
 :- use_module(library(apply)).
@@ -74,7 +79,8 @@ type_introspection_function_prefix(
 		 *******************************/
 
 :- dynamic
-    waitable/4.                     % Type, Node, Object, CallBack
+    waitable/4,                     % Type, Node, Object, CallBack
+    node_object/3.                  % Type, Node, Object
 
 %!  ros_subscribe(+Topic, :CallBack, +Options) is det.
 %
@@ -130,6 +136,30 @@ ros_unsubscribe(Topic) :-
     retract(waitable(subscription(Topic), _Node, Subscription, _CallBack)),
     !,
     '$ros_unsubscribe'(Subscription).
+
+%!  ros_publish(+Topic, +Message) is det.
+%
+%   Send a message to Topic.
+
+ros_publish(Topic, Message) :-
+    node_object(subscription(Topic), _Node, Subscription),
+    !,
+    '$ros_publish'(Subscription, Message).
+ros_publish(Topic, Message) :-
+    ros_publisher(Topic, []),
+    node_object(subscription(Topic), _Node, Subscription),
+    '$ros_publish'(Subscription, Message).
+
+
+%!  ros_publisher(+Topic, +Options) is det.
+
+ros_publisher(Topic, Options) :-
+    message_type(Topic, MsgType, Options),
+    node(Node, Options),
+    ros_type_support(MsgType, TypeSupport),
+    qos_profile(QoSProfile, Options),
+    '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
+    assert(node_object(subscription(Topic), Node, Subscription)).
 
 %!  ros_spin is det.
 %!  ros_spin(+Node) is det.
@@ -392,17 +422,17 @@ ros_property_node(name(Name), Node) :-
 ros_property_node(namespace(Name), Node) :-
     '$ros_node_prop'(Node, namespace, Name).
 
-%!  ros_publish(+Node, +MsgType, +Topic, +QoSProfile, -Publisher)
+%!  ros_publisher(+Node, +MsgType, +Topic, +QoSProfile, -Publisher)
 %
-%   @tbd: Not yet working (lacking type support)
+%   Create a publisher for the given topic.
 
-ros_publish(Node, MsgType, Topic, QoSProfile, Publisher) :-
+ros_publisher(Node, MsgType, Topic, QoSProfile, Publisher) :-
     ros_type_support(MsgType, TypeSupport),
-    '$ros_publish'(Node, TypeSupport, Topic, QoSProfile, Publisher).
+    '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Publisher).
 
 %!  ros_subscribe(+Node, +MsgType, +Topic, +QoSProfile, -Subscription)
 %
-%   @tbd: Not yet working (lacking type support)
+%   Create a subscription for the given topic.
 
 ros_subscribe(Node, MsgType, Topic, QoSProfile, Subscription) :-
     ros_type_support(MsgType, TypeSupport),
@@ -428,9 +458,7 @@ ros_type_support(MsgType, MsgFunctions) :-
     type_support_function_prefix(TSPrefix),
     type_introspection_function_prefix(ISPrefix),
     type_support_function(MsgType, Package, FuncPostfix),
-    load_type_support_shared_object(Package, rosidl_typesupport_c, _),
-    load_type_support_shared_object(Package, rosidl_generator_c, _),
-    load_type_support_shared_object(Package, rosidl_typesupport_introspection_c, _),
+    load_type_support(Package),
     atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
     atomic_list_concat([ISPrefix, FuncPostfix], '__', ISFunc),
     '$ros_message_type'(ISFunc, TSFunc, FuncPostfix, MsgFunctions).
@@ -461,10 +489,23 @@ func_package(Func, Package) :-
     !,
     sub_atom(Func, 0, Pre, _, Package).
 
+load_type_support(Package) :-
+    rwm_c_identifier(Id),
+    atom_concat(rosidl_typesupport_, Id, WM_TypeSupport),
+    load_type_support_shared_object(Package, WM_TypeSupport, _),
+    load_type_support_shared_object(Package, rosidl_typesupport_c, _),
+    load_type_support_shared_object(Package, rosidl_generator_c, _),
+    load_type_support_shared_object(Package, rosidl_typesupport_introspection_c, _).
+
 load_type_support_shared_object(Package, Which, Handle) :-
     current_prolog_flag(shared_object_extension, SO),
     atomic_list_concat([lib,Package,'__',Which, '.', SO], File),
     open_shared_object(File, Handle, [global]).
+
+rwm_c_identifier(Id) :-
+    ros_property(rmw_identifier(RWM_ID)),
+    split_string(RWM_ID, "_", "", [_,MW,_]),
+    atom_concat(MW, '_c', Id).
 
 %!  ros_type_introspection(+MsgType, -Description) is det.
 %
@@ -525,3 +566,9 @@ ros_type_introspection(MsgType, Description) :-
 
 ros_property(rmw_identifier(Id)) :-
     ros_rwm_implementation(Id).
+
+%!  ros_identifier_prolog(?Ros, ?Prolog) is det.
+%
+%   Translate  between  ROS  CamelCase  (type)  identifiers  and  Prolog
+%   underscore separated identifies.  At  least   one  argument  must be
+%   instantiated to an atom. Currently only supports ASCII identifiers.

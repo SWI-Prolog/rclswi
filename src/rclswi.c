@@ -60,6 +60,9 @@ static void	rcl_free(void *ptr, rcl_allocator_t *allocator);
 static int	get_utf8_name_ex(term_t t, char **name);
 static int	put_message(term_t Message, void *msg,
 			    const rosidl_message_type_support_t *ts);
+static int	fill_message(term_t Message, void *msg,
+			     const rosidl_message_type_support_t *ts,
+			     int noarray);
 
 static atom_t ATOM_cli_args;
 static atom_t ATOM_inf;
@@ -519,6 +522,7 @@ typedef struct
   // in a wait set.
   rcl_publisher_t publisher;
   rcl_node_t * node;
+  rclswi_message_type_t *type_support;
 } rclswi_publisher_t;
 
 static void
@@ -530,8 +534,8 @@ free_rcl_publisher(void *ptr)
 
 
 static foreign_t
-ros_publish(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
-	    term_t Publisher)
+ros_publisher(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
+	      term_t Publisher)
 { rcl_node_t *node;
   int rc = TRUE;
   char *topic;
@@ -550,6 +554,7 @@ ros_publish(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
     return PL_resource_error("memory");
   pub->publisher = rcl_get_zero_initialized_publisher();
   pub->node = node;
+  pub->type_support = msg_type;
 
   TRY(rcl_publisher_init(&pub->publisher, node, msg_type->type_support,
 			 topic, &publisher_ops));
@@ -562,6 +567,28 @@ ros_publish(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
 
   return rc;
 }
+
+static foreign_t
+ros_publish(term_t Publisher, term_t Message)
+{ rclswi_publisher_t *pub;
+  void *msg = NULL;
+  int rc = TRUE;
+
+  if ( !get_pointer(Publisher, (void**)&pub, &publisher_type) )
+    return FALSE;
+
+  msg = (*pub->type_support->create)();
+  (*pub->type_support->init)(msg);
+
+  if ( (rc=fill_message(Message, msg, pub->type_support->introspection, FALSE)) )
+    TRY(rcl_publish(&pub->publisher, msg, NULL));
+
+  (*pub->type_support->fini)(msg);
+  (*pub->type_support->destroy)(msg);
+
+  return rc;
+}
+
 
 
 		 /*******************************
@@ -670,6 +697,9 @@ ros_take(term_t Subscription, term_t Message, term_t MsgInfo)
 		 *	      TYPES		*
 		 *******************************/
 
+static int	put_message(term_t Message, void *msg,
+			    const rosidl_message_type_support_t *ts);
+
 static int
 rclswi_names_and_types_fini(rcl_names_and_types_t *names_and_types)
 { int rc = TRUE;
@@ -769,11 +799,15 @@ ros_message_type(term_t Introspection, term_t TypeSupport,
       strcpy(buf, prefix);
       end = buf+strlen(buf);
 
-      if ( !(ret->init	        = msg_func(buf, end, "__init"))      ||
-	   !(ret->create        = msg_func(buf, end, "__create"))    ||
-	   !(ret->fini          = msg_func(buf, end, "__fini"))      ||
-	   !(ret->destroy       = msg_func(buf, end, "__destroy"))   ||
-	   !(ret->introspection = introspection_func(introspection)) ||
+      if ( !(ret->init	        = msg_func(buf, end, "__init"))              ||
+	   !(ret->create        = msg_func(buf, end, "__create"))            ||
+	   !(ret->fini          = msg_func(buf, end, "__fini"))              ||
+	   !(ret->destroy       = msg_func(buf, end, "__destroy"))           ||
+	   !(ret->seq_init	= msg_func(buf, end, "__Sequence__init"))    ||
+	   !(ret->seq_create    = msg_func(buf, end, "__Sequence__create"))  ||
+	   !(ret->seq_fini      = msg_func(buf, end, "__Sequence__fini"))    ||
+	   !(ret->seq_destroy   = msg_func(buf, end, "__Sequence__destroy")) ||
+	   !(ret->introspection = introspection_func(introspection))         ||
 	   !(ret->type_support  = introspection_func(type_support)) )
       { free(ret);
 	return FALSE;
@@ -824,13 +858,13 @@ static typesupport_type types[] = {
   { 0, NULL, 0 }
 };
 
-#define FAST_NAME_LEN 64
+#define FAST_NAME_LEN 200
 
 static atom_t
 lwr_atom(const char *name)
-{ size_t len = strlen(name);
-  char buf[FAST_NAME_LEN+1];
-  char *lwr = (len > FAST_NAME_LEN ? malloc(len+1) : buf);
+{ size_t len = strlen(name)*2+1;
+  char buf[FAST_NAME_LEN];
+  char *lwr = (len > FAST_NAME_LEN ? malloc(len) : buf);
 
   if ( lwr )
   { const char *i=name;
@@ -838,7 +872,15 @@ lwr_atom(const char *name)
     atom_t a;
 
     while (*i)
-      *o++ = tolower(*i++);
+    { if ( o > lwr && !isupper(i[0]) && i[1] && isupper(i[1]) )
+      { *o++ = i[0];
+	*o++ = '_';
+	*o++ = tolower(i[1]);
+	i += 2;
+      } else
+      { *o++ = tolower(*i++);
+      }
+    }
     *o = '\0';
 
     a = PL_new_atom(lwr);
@@ -850,6 +892,68 @@ lwr_atom(const char *name)
 
   return (atom_t)0;
 }
+
+
+static atom_t
+camel_case_atom(const char *name)
+{ size_t len = strlen(name)+1;
+  char buf[FAST_NAME_LEN];
+  char *camel = (len > FAST_NAME_LEN ? malloc(len) : buf);
+
+  if ( camel )
+  { const char *i=name;
+    char *o = camel;
+    atom_t a;
+
+    if ( strncmp(i, "uint", 4) == 0 && isdigit(i[4]) )
+    { strcpy(o, "UInt");
+      i += 4;
+      o += 4;
+    }
+
+    while (*i)
+    { if ( o == camel )
+      { *o++ = toupper(*i++);
+      } else if ( *i == '_' )
+      { *o++ = toupper(i[1]);
+	i += 2;
+      } else
+      { *o++ = *i++;
+      }
+    }
+    *o = '\0';
+
+    a = PL_new_atom(camel);
+    if ( camel != buf )
+      free(camel);
+
+    return a;
+  }
+
+  return (atom_t)0;
+}
+
+
+static foreign_t
+ros_identifier_prolog(term_t Ros, term_t Prolog)
+{ char *ros, *prolog;
+  atom_t a;
+  int rc;
+
+  if ( PL_get_atom_chars(Ros, &ros) )
+  { a = lwr_atom(ros);
+    rc = PL_unify_atom(Prolog, a);
+  } else if ( PL_get_atom_chars(Prolog, &prolog) )
+  { a = camel_case_atom(prolog);
+    rc = PL_unify_atom(Ros, a);
+  } else
+    return PL_type_error("atom", PL_is_variable(Ros) ? Prolog : Ros);
+
+  PL_unregister_atom(a);
+
+  return rc;
+}
+
 
 
 static atom_t
@@ -898,7 +1002,6 @@ put_type(term_t t, const rosidl_message_type_support_t *ts)
 
 	  rc = ( (nelms = PL_new_term_ref()) &&
 		 PL_put_integer(nelms, mem->array_size_) &&
-		 PL_put_atom(values+i, ta) &&
 		 PL_cons_functor(values+i, FUNCTOR_list2, values+i, nelms) );
 
 	  if ( nelms )
@@ -931,7 +1034,7 @@ ros_type_introspection(term_t MsgFuctions, term_t Type)
 
 
 static size_t
-size_of_member_type(uint8_t type_id)
+sizeof_primitive_type(uint8_t type_id)
 { switch (type_id)
   { case rosidl_typesupport_introspection_c__ROS_TYPE_FLOAT:
       return sizeof(float);
@@ -965,7 +1068,7 @@ size_of_member_type(uint8_t type_id)
       return sizeof(int64_t);
     case rosidl_typesupport_introspection_c__ROS_TYPE_STRING:
       return sizeof(rosidl_runtime_c__String);
-#if 0					/* not in foxy */
+#ifdef HAVE_ROS_WSTRING
     case rosidl_typesupport_introspection_c__ROS_TYPE_WSTRING:
       return sizeof(rosidl_runtime_c__U16String);
 #endif
@@ -998,8 +1101,10 @@ put_primitive(term_t t, void *ptr, uint8_t type_id)
       return PL_put_atom_nchars(t, 1, (char *)&f);
     }
     case rosidl_typesupport_introspection_c__ROS_TYPE_WCHAR:
-    { wchar_t f = *(wchar_t*)ptr;
-      return PL_unify_wchars(t, PL_ATOM, 1, &f);
+    { wint_t f = *(wint_t*)ptr;		/* TBD: correct size? */
+      wchar_t s[1];
+      s[0] = f;
+      return PL_unify_wchars(t, PL_ATOM, 1, s);
     }
     case rosidl_typesupport_introspection_c__ROS_TYPE_BOOLEAN:
     { uint8_t f = *(char*)ptr;		/* TBD: correct size? */
@@ -1035,13 +1140,13 @@ put_primitive(term_t t, void *ptr, uint8_t type_id)
       return PL_put_uint64(t, f);
     }
     case rosidl_typesupport_introspection_c__ROS_TYPE_INT64:
-    { uint64_t f = *(int64_t*)ptr;
+    { int64_t f = *(int64_t*)ptr;
       return PL_put_int64(t, f);
     }
     case rosidl_typesupport_introspection_c__ROS_TYPE_STRING:
     { rosidl_runtime_c__String *s = ptr;
 
-      return PL_unify_chars(t, PL_STRING|REP_UTF8, s->size, s->data);
+      return PL_put_chars(t, PL_STRING|REP_UTF8, s->size, s->data);
     }
     case rosidl_typesupport_introspection_c__ROS_TYPE_WSTRING:
       Sdprintf("TBD: Strings support\n");
@@ -1051,30 +1156,51 @@ put_primitive(term_t t, void *ptr, uint8_t type_id)
   }
 }
 
-
 static int
-put_dynamic_array(term_t Message, void *msg, const rosidl_typesupport_introspection_c__MessageMember *member)
-{ Sdprintf("TBD: dynamic arrays\n");
-  return FALSE;
+put_array(term_t List, void *msg, size_t len,
+	  const rosidl_typesupport_introspection_c__MessageMember *member)
+{ term_t head = PL_new_term_ref();
+
+  PL_put_nil(List);
+
+  if ( member->type_id_ ==
+       rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+  { const rosidl_message_type_support_t *ts = member->members_;
+    const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
+    size_t elem_size = members->size_of_;
+
+    for(ssize_t i=(ssize_t)len; --i >= 0; )
+    { if ( !put_message(head,  (char*)msg+elem_size*i, ts) ||
+	   !PL_cons_list(List, head, List) )
+	return FALSE;
+    }
+  } else
+  { size_t elem_size = sizeof_primitive_type(member->type_id_);
+
+    for(ssize_t i=(ssize_t)len; --i >= 0; )
+    { if ( !put_primitive(head, (char*)msg+elem_size*i, member->type_id_) ||
+	   !PL_cons_list(List, head, List) )
+	return FALSE;
+    }
+  }
+
+  PL_reset_term_refs(head);
+
+  return TRUE;
 }
 
 static int
-put_fixed_array(term_t Message, void *msg, const rosidl_typesupport_introspection_c__MessageMember *member)
-{ term_t tail = PL_copy_term_ref(Message);
-  term_t head = PL_new_term_ref();
-  int rc;
-  size_t elem_size = size_of_member_type(member->type_id_);
+put_dynamic_array(term_t Message, void *msg,
+		  const rosidl_typesupport_introspection_c__MessageMember *member)
+{ rosidl_runtime_c__octet__Sequence *seq = msg;
 
-  for(size_t i=0; i<member->array_size_; i++)
-  { if ( !PL_unify_list(tail, head, tail) ||
-	 !put_primitive(head, (char*)msg+elem_size*i, member->type_id_) )
-      return FALSE;
-  }
+  return put_array(Message, seq->data, seq->size, member);
+}
 
-  rc = PL_unify_nil(tail);
-  PL_reset_term_refs(tail);
-
-  return rc;
+static int
+put_fixed_array(term_t Message, void *msg,
+		const rosidl_typesupport_introspection_c__MessageMember *member)
+{ return put_array(Message, msg, member->array_size_, member);
 }
 
 
@@ -1101,18 +1227,19 @@ put_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts)
     }
 
     for(uint32_t i=0; rc && i<members->member_count_; i++)
-    { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_+i;
+    { const rosidl_typesupport_introspection_c__MessageMember *mem
+		= members->members_+i;
 
       keys[i] = lwr_atom(mem->name_);
       DEBUG(5, Sdprintf("Put %s -> ", mem->name_));
-      if ( mem->type_id_ == rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+      if ( mem->is_array_ )
+      { if ( mem->is_upper_bound_ || mem->array_size_ == 0 )
+	  rc = put_dynamic_array(values+i, (char*)msg+mem->offset_, mem);
+	else
+	  rc = put_fixed_array(values+i, (char*)msg+mem->offset_, mem);
+      } else if ( mem->type_id_ == rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
       { if ( !put_message(values+i, (char*)msg+mem->offset_, mem->members_) )
 	  rc = FALSE;
-      } else if ( mem->is_array_ )
-      { if ( mem->is_upper_bound_ || mem->array_size_ == 0 )
-	  return put_dynamic_array(Message, msg, mem);
-	else
-	  return put_fixed_array(Message, msg, mem);
       } else
       { if ( !put_primitive(values+i, (char*)msg+mem->offset_, mem->type_id_) )
 	  rc = FALSE;
@@ -1129,6 +1256,295 @@ put_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts)
   return rc;
 }
 
+
+		 /*******************************
+		 *	  PROLOG -> ROS		*
+		 *******************************/
+
+#include <rosidl_runtime_c/primitives_sequence_functions.h>
+
+typedef bool (*seq_init_function)(void *msg, size_t size);
+
+static seq_init_function
+primitive_seq_init_function(uint8_t type_id)
+{ switch(type_id)
+  { case rosidl_typesupport_introspection_c__ROS_TYPE_FLOAT:
+      return (seq_init_function)rosidl_runtime_c__float32__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_DOUBLE:
+      return (seq_init_function)rosidl_runtime_c__double__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_LONG_DOUBLE:
+      return (seq_init_function)rosidl_runtime_c__long_double__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_CHAR:
+      return (seq_init_function)rosidl_runtime_c__char__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_WCHAR:
+      return (seq_init_function)rosidl_runtime_c__wchar__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_BOOLEAN:
+      return (seq_init_function)rosidl_runtime_c__bool__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_OCTET:
+      return (seq_init_function)rosidl_runtime_c__octet__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT8:
+      return (seq_init_function)rosidl_runtime_c__uint8__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT8:
+      return (seq_init_function)rosidl_runtime_c__int8__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT16:
+      return (seq_init_function)rosidl_runtime_c__uint16__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT16:
+      return (seq_init_function)rosidl_runtime_c__int16__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT32:
+      return (seq_init_function)rosidl_runtime_c__uint32__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT32:
+      return (seq_init_function)rosidl_runtime_c__int32__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT64:
+      return (seq_init_function)rosidl_runtime_c__uint64__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT64:
+      return (seq_init_function)rosidl_runtime_c__int64__Sequence__init;
+    case rosidl_typesupport_introspection_c__ROS_TYPE_STRING:
+      return (seq_init_function)rosidl_runtime_c__String__Sequence__init;
+#ifdef HAVE_ROS_WSTRING
+    case rosidl_typesupport_introspection_c__ROS_TYPE_WSTRING:
+      return (seq_init_function)rosidl_runtime_c__U16String__Sequence__init;
+#endif
+    default:
+      assert(0);
+      return FALSE;
+  }
+
+}
+
+
+static int
+fill_primitive(term_t t, void *ptr, uint8_t type_id)
+{ int rc;
+
+  switch(type_id)
+  { case rosidl_typesupport_introspection_c__ROS_TYPE_FLOAT:
+    { rc = PL_cvt_i_single(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_DOUBLE:
+    { rc = PL_get_float_ex(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_LONG_DOUBLE:
+    { double d;
+
+      if ( (rc=PL_get_float_ex(t, &d)) )
+      { long double *p = ptr;
+	*p = (long double)d;
+      }
+
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_CHAR:
+    { rc = PL_cvt_i_char(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_WCHAR:
+    { int c;
+
+      if ( (rc=PL_get_char_ex(t, &c, FALSE)) )
+      {	wint_t *p = ptr;		/* TBD: correct size? */
+	*p = c;
+      }
+
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_BOOLEAN:
+    { int v;
+
+      if ( (rc=PL_get_bool_ex(t, &v)) )
+      { uint8_t *p = ptr;		/* TBD: correct size? */
+	*p = !!v;
+      }
+
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_OCTET:
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT8:
+    { rc = PL_cvt_i_uchar(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT8:
+    { rc = PL_cvt_i_char(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT16:
+    { rc = PL_cvt_i_ushort(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT16:
+    { rc = PL_cvt_i_short(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT32:
+    { rc = PL_cvt_i_uint(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT32:
+    { rc = PL_cvt_i_int(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_UINT64:
+    { rc = PL_cvt_i_uint64(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_INT64:
+    { rc = PL_cvt_i_int64(t, ptr);
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_STRING:
+    { char *s;
+      size_t len;
+
+      if ( (rc=PL_get_nchars(t, &len, &s, CVT_ATOMIC|CVT_LIST|CVT_EXCEPTION|REP_UTF8)) )
+      { rosidl_runtime_c__String *str = ptr;
+
+	if ( strlen(s) < len )
+	  return PL_domain_error("string_without_null", t);
+
+	if ( !rosidl_runtime_c__String__assignn(str, s, len) )
+	  rc = PL_resource_error("memory");
+      }
+      break;
+    }
+    case rosidl_typesupport_introspection_c__ROS_TYPE_WSTRING:
+    default:
+      assert(0);
+      return FALSE;
+  }
+
+  return rc;
+}
+
+
+static int
+fill_primitive_array(term_t List, void *array, size_t len, uint8_t type_id)
+{ term_t tail = PL_copy_term_ref(List);
+  term_t head = PL_new_term_ref();
+  size_t elemsize = sizeof_primitive_type(type_id);
+
+  for(size_t i=0; i < len; i++)
+  { if ( !PL_get_list(tail, head, tail) ||
+	 !fill_primitive(head, (char*)array + elemsize*i, type_id) )
+      return FALSE;
+  }
+  return PL_get_nil(tail);
+}
+
+
+static int
+fill_static_struct_array(term_t List, void *array, size_t len,
+			 const rosidl_message_type_support_t *ts)
+{ const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
+  term_t tail = PL_copy_term_ref(List);
+  term_t head = PL_new_term_ref();
+  size_t elemsize = members->size_of_;
+
+  for(size_t i=0; i < len; i++)
+  { if ( !PL_get_list(tail, head, tail) ||
+	 !fill_message(head, (char*)array + elemsize*i, ts, TRUE) )
+      return FALSE;
+  }
+  return PL_get_nil(tail);
+}
+
+static int
+fill_dynamic_struct_array(term_t List, void *array, size_t len,
+			  const rosidl_typesupport_introspection_c__MessageMember *mem)
+{ if ( (*mem->resize_function)(array, len) )
+  { term_t tail = PL_copy_term_ref(List);
+    term_t head = PL_new_term_ref();
+
+    for(size_t i = 0; i < len; i++)
+    { if ( !PL_get_list(tail, head, tail) ||
+	   !fill_message(head, mem->get_function(array, i), mem->members_, TRUE) )
+      return FALSE;
+    }
+
+    return PL_get_nil(tail);
+  }
+
+  return PL_resource_error("memmory");
+}
+
+
+static int
+list_of_length(term_t t, size_t len, size_t expected, int fixed)
+{ Sdprintf("TBD: Non-list length\n");
+
+  if ( fixed )
+    return PL_domain_error("fixed_list_length", t);
+  else
+    return PL_domain_error("bounded_list_length", t);
+}
+
+
+static int
+fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
+	     int noarray)
+{ const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
+  term_t Value = PL_new_term_ref();
+  int rc = TRUE;
+
+  for(uint32_t i=0; rc && i<members->member_count_; i++)
+  { const rosidl_typesupport_introspection_c__MessageMember *mem
+		= members->members_+i;
+    atom_t key = lwr_atom(mem->name_);
+
+    if ( PL_get_dict_key(key, Message, Value) )
+    { if ( mem->is_array_ && !noarray )
+      { size_t len;
+
+	if ( PL_skip_list(Value, 0, &len) != PL_LIST )
+	{ rc = PL_type_error("list", Value);
+	  OUTFAIL;
+	}
+
+	if ( mem->is_upper_bound_ || mem->array_size_ == 0 )	/* Sequence */
+	{ if ( mem->is_upper_bound_ && len > mem->array_size_ )
+	  { rc = list_of_length(Value, len, mem->array_size_, TRUE);
+	    OUTFAIL;
+	  }
+
+	  if ( mem->type_id_ ==
+	       rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+	  { rc = fill_dynamic_struct_array(Value, (char*)msg+mem->offset_, len, mem);
+	  } else
+	  { rosidl_runtime_c__octet__Sequence *seq = (void*)(char*)msg+mem->offset_;
+	    seq_init_function seq_init = primitive_seq_init_function(mem->type_id_);
+
+	    rc = ( (*seq_init)(seq, len) &&
+		   fill_primitive_array(Value, seq->data, len, mem->type_id_) );
+	  }
+	} else
+	{ if ( len == mem->array_size_ )
+	  { if ( mem->type_id_ ==
+	       rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+	      rc = fill_static_struct_array(Value, (char*)msg+mem->offset_,
+					    mem->array_size_, mem->members_);
+	    else
+	      rc = fill_primitive_array(Value, (char*)msg+mem->offset_,
+					mem->array_size_, mem->type_id_);
+	  } else
+	  { rc = list_of_length(Value, len, mem->array_size_, TRUE);
+	  }
+	}
+      } else if ( mem->type_id_ ==
+		  rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+      { if ( !fill_message(Value, (char*)msg+mem->offset_, mem->members_, FALSE) )
+	  OUTFAIL;
+      } else
+      { if ( !fill_primitive(Value, (char*)msg+mem->offset_, mem->type_id_) )
+	  OUTFAIL;
+      }
+    }
+  }
+
+out:
+  PL_reset_term_refs(Value);
+
+  return rc;
+}
 
 
 		 /*******************************
@@ -1424,7 +1840,7 @@ install_librclswi(void)
   PL_register_foreign("ros_create_node",    4, ros_create_node,    0);
   PL_register_foreign("ros_node_fini",      1, ros_node_fini,      0);
   PL_register_foreign("$ros_node_prop",     3, ros_node_prop,      0);
-  PL_register_foreign("$ros_publish",       5, ros_publish,        0);
+  PL_register_foreign("$ros_publisher",     5, ros_publisher,      0);
   PL_register_foreign("$ros_subscribe",     5, ros_subscribe,      0);
   PL_register_foreign("$ros_unsubscribe",   1, ros_unsubscribe,    0);
 
@@ -1439,6 +1855,9 @@ install_librclswi(void)
   PL_register_foreign("ros_wait",	    3, ros_wait,	   0);
 
   PL_register_foreign("ros_take",	    3, ros_take,           0);
+  PL_register_foreign("$ros_publish",	    2, ros_publish,        0);
 
   PL_register_foreign("ros_rwm_implementation", 1, ros_rwm_implementation, 0);
+
+  PL_register_foreign("ros_identifier_prolog", 2, ros_identifier_prolog, 0);
 }
