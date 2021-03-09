@@ -29,4 +29,5 @@ typedef struct rclswi_message_type_t
   void  (*seq_fini)(void*);
 } rclswi_message_type_t;
 
+
 #endif /*RCLSWI_H_INCLUDED*/

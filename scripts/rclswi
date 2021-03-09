@@ -17,4 +17,4 @@ SCRIPT_FILE=""
 #fi
 
 #exec /usr/bin/swipl ${PL_INIT_FILE} ${SCRIPT_FILE} ${PL_ARGS}
-exec /home/janw/bin/swipl -p foreign=$RCLSWI/lib ${PL_INIT_FILE} ${SCRIPT_FILE}
+exec swipl -p "library=$RCLSWI/prolog" "${PL_INIT_FILE}" "${SCRIPT_FILE}"

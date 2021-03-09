@@ -14,7 +14,7 @@
 
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
 
 % TBD: Should not be needed
 

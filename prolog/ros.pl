@@ -48,15 +48,30 @@
 
             ros_identifier_prolog/2     % ?RosName, ?PrologName
           ]).
-
 :- use_module(library(apply)).
 :- use_module(library(error)).
 :- use_module(library(lists)).
 :- use_module(library(prolog_code)).
 :- use_module(library(option)).
+:- use_module(library(filesex)).
 
 :- meta_predicate
     ros_subscribe(+, 1, +).
+
+:- dynamic ros_lib_dir/1.
+:- public unique_pred/0.
+
+unique_pred.
+
+user:file_search_path(foreign, LibDir) :-
+    (   ros_lib_dir(LibDir)
+    ->  true
+    ;   source_file(unique_pred, ThisFile),
+        file_directory_name(ThisFile, ThisDir),
+        file_directory_name(ThisDir, RclSWIDir),
+        directory_file_path(RclSWIDir, lib, LibDir),
+        asserta(ros_lib_dir(LibDir))
+    ).
 
 :- use_foreign_library(foreign(librclswi)).
 
@@ -238,9 +253,8 @@ ros_ready(subscription(_), Subscription, CallBack) :-
 %     - domain(Integer)
 %       Set the ROS domain
 %     - node(Name, Options)
-%       Set the name of the default node and the options to create it
-%
-%   @tbd Create default arguments from command line.
+%       Set the name of the default node and the options to create it.
+%       Options are passed to ros_create_node/4.
 
 :- dynamic
     ros_default/1,                      % Term
@@ -275,13 +289,16 @@ check_arg(I, Term, Types) :-
     arg(I, Types, Type),
     must_be(Type, Value).
 
-ros_default(init(list(atomic)),       "ROS context initialization arguments").
-ros_default(domain(integer),          "ROS domain").
-ros_default(node(atom, list(atomic)), "ROS default node initialization arguments").
+ros_default(init(list(atomic)),         "ROS context initialization arguments").
+ros_default(domain(integer),            "ROS domain").
+ros_default(node(atom, list(compound)), "ROS default node initialization options").
 
 %!  ros_default_context(-Context)
 %
-%   Default context to use for ROS operations.
+%   Default context to use for ROS   operations.  This creates a default
+%   ROS  context,  either  from  the   `init`  arguments  provided  with
+%   ros_set_defaults/1 or command line  arguments following `--ros-args`
+%   passed to Prolog.
 
 ros_default_context(Context) :-
     ros_context_store(Context0),
@@ -295,15 +312,24 @@ ros_default_context_sync(Context) :-
     ros_context_store(Context),
     !.
 ros_default_context_sync(Context) :-
-    (   ros_default(init(Args))
+    (   ros_default(init(Argv))
     ->  true
-    ;   Args = []
+    ;   ros_default_argv(Argv)
     ),
     ignore(ros_default(domain(Domain))),
     ros_create_context(Context),
-    ros_init(Context, Args, Domain),
+    ros_init(Context, Argv, Domain),
+    '$ros_logging_initialize',
     asserta(ros_context_store(Context)),
     asserta(ros_property_store(domain(Domain))).
+
+ros_default_argv(ROSArgv) :-
+    current_prolog_flag(argv, Argv),
+    ROSArgv = ['--ros-args'|_],
+    append(_, ROSArgv, Argv),
+    !.
+ros_default_argv([]).
+
 
 %!  ros_default_node(-Node)
 %
@@ -350,6 +376,7 @@ ros_shutdown :-
 ros_shutdown(Context) :-
     forall(ros_node_store(Node, Context),
            ros_shutdown_node(Node)),
+    '$ros_logging_shutdown',
     forall(ros_context_store(Context),
            '$ros_shutdown'(Context)).
 
@@ -405,6 +432,15 @@ ros_ok :-
 
 
 %!  ros_create_node(+Context, +Name, -Node, +Options)
+%
+%   Creae a ROS node in Context.  Options processed:
+%
+%     - argv(+Arguments)
+%       Arguments used to initialize the node.  Default come from the
+%       global initialization arguments passed to ros_init/3.
+%     - rosout(+Boolean)
+%       Enable/disable ros logging to ``/rosout``. Default is to have
+%       this enabled.
 
 %!  ros_node_property(+Node, ?Property) is nondet.
 %
@@ -413,6 +449,9 @@ ros_ok :-
 %
 %     - name(Name)
 %     - namespace(Namespace)
+%     - logger_name(LoggerName)
+%       Name of the default logger for this node. See
+%       library(ros/logging) for details.
 
 ros_node_property(Node, Property) :-
     ros_property_node(Property, Node).
@@ -421,6 +460,8 @@ ros_property_node(name(Name), Node) :-
     '$ros_node_prop'(Node, name, Name).
 ros_property_node(namespace(Name), Node) :-
     '$ros_node_prop'(Node, namespace, Name).
+ros_property_node(logger_name(Name), Node) :-
+    '$ros_node_prop'(Node, logger_name, Name).
 
 %!  ros_publisher(+Node, +MsgType, +Topic, +QoSProfile, -Publisher)
 %

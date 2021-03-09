@@ -16,7 +16,7 @@
 This file demonstrates the status of the  proof of concept of the rclswi
 ROS2 Prolog client library.  To run, run from your ROS2 ws
 
-    swipl -p foreign=install/rclswi/lib src/rclswi/examples/demo.pl
+    swipl -p library=install/rclswi/prolog src/rclswi/examples/demo.pl
 
 After which one normally starts spinning in a thread using
 
@@ -49,7 +49,8 @@ readability).
 
 % Load the ROS library and make it available at the toplevel
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
+:- reexport(library(ros/logging)).
 
 % This can be used to define the default   node. If this is not done the
 % node will be called  swi_prolog_NNN,  where   NNN  is  a  large random
@@ -114,7 +115,7 @@ py_listener :-
                   ]).
 
 on_py(Message) :-
-    format('Heart ~p~n', [Message]).
+    ros_log(info,  "Heart ~p", [Message]).
 
 
 		 /*******************************

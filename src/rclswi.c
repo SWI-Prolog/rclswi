@@ -50,25 +50,25 @@
 #include <rosidl_runtime_c/message_type_support_struct.h>
 #include <rosidl_runtime_c/string_functions.h>
 
+#include "common.h"
 #include "rclswi.h"
 
-static rcl_allocator_t default_allocator;
-static rcl_context_t  *default_context = NULL;
+rcl_allocator_t rclswi_default_allocator;
+static rcl_context_t  *rclswi_default_context_ptr = NULL;
 
-static void *	rcl_alloc(size_t bytes, rcl_allocator_t *allocator);
-static void	rcl_free(void *ptr, rcl_allocator_t *allocator);
-static int	get_utf8_name_ex(term_t t, char **name);
 static int	put_message(term_t Message, void *msg,
 			    const rosidl_message_type_support_t *ts);
 static int	fill_message(term_t Message, void *msg,
 			     const rosidl_message_type_support_t *ts,
 			     int noarray);
 
-static atom_t ATOM_cli_args;
+static atom_t ATOM_argv;
 static atom_t ATOM_inf;
 static atom_t ATOM_infinite;
 static atom_t ATOM_name;
 static atom_t ATOM_namespace;
+static atom_t ATOM_logger_name;
+static atom_t ATOM_rosout;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -118,24 +118,22 @@ static const c_pointer_type rclswi_message_type_type =
 
 static int debuglevel = 0;
 
-#define DEBUG(level, goal) \
-	do				\
-	{ if ( debuglevel >= level )	\
-	    goal;			\
-	} while(0)
-
 static foreign_t
 ros_debug(term_t level)
 { return PL_get_integer_ex(level, &debuglevel);
 }
 
+int
+ros_debug_level(void)
+{ return debuglevel;
+}
 
 
 		 /*******************************
 		 *	      ERRORS		*
 		 *******************************/
 
-static int
+int
 set_error(rcl_ret_t ret)
 { term_t ex;
   const char *msg = rcl_get_error_string().str;
@@ -153,7 +151,7 @@ set_error(rcl_ret_t ret)
   return rc;
 }
 
-static void
+void
 print_error(rcl_ret_t ret, const char *file, int line, const char *goal)
 { Sdprintf("% ERROR: [rclswi %s:%d] %s:\n"
 	   "% ERROR: %s\n",
@@ -161,45 +159,24 @@ print_error(rcl_ret_t ret, const char *file, int line, const char *goal)
   rcl_reset_error();
 }
 
-#define TRY(goal) \
-	do				\
-	{ if ( rc )			\
-	  { DEBUG(9, Sdprintf("Running %s -> ", #goal)); \
-	    rcl_ret_t __ret = (goal);	\
-	    DEBUG(9, Sdprintf("%d\n", __ret)); \
-	    if ( __ret != RCL_RET_OK )	\
-	      rc = set_error(__ret);	\
-	  }				\
-	} while(0)
-
-#define TRY_ANYWAY(goal) \
-	do				\
-	{ DEBUG(9, Sdprintf("Running (rc=%d) %s -> ", rc, #goal)); \
-	  rcl_ret_t __ret = (goal);	\
-          DEBUG(9, Sdprintf("%d\n", __ret)); \
-	  if ( __ret != RCL_RET_OK )	\
-	    rc = set_error(__ret);	\
-	} while(0)
-
-#define OUTFAIL \
-	do				\
-	{ rc = FALSE;			\
-	  goto out;			\
-	} while(0)
-
-#define TRYVOID(goal) \
-	do				\
-	{ rcl_ret_t __ret = (goal);	\
-	  if ( __ret != RCL_RET_OK )	\
-	    print_error(__ret, __FILE__, __LINE__, #goal); \
-	} while(0)
-
-
 		 /*******************************
 		 *	      CONTEXT		*
 		 *******************************/
 
-static rcl_context_t *default_context;
+rcl_context_t *
+rclswi_default_context(void)
+{ if ( !rclswi_default_context_ptr )
+  { rcl_context_t *context;
+
+    if ( (context=malloc(sizeof(*context))) )
+    { *context = rcl_get_zero_initialized_context();
+      rclswi_default_context_ptr = context;
+    }
+  }
+
+  return rclswi_default_context_ptr;
+}
+
 
 static foreign_t
 ros_create_context(term_t t)
@@ -207,8 +184,8 @@ ros_create_context(term_t t)
 
   if ( (context=malloc(sizeof(*context))) )
   { *context = rcl_get_zero_initialized_context();
-    if ( !default_context )
-      default_context = context;
+    if ( !rclswi_default_context_ptr )
+      rclswi_default_context_ptr = context;
     return unify_pointer(t, context, &context_type);
   }
 
@@ -220,8 +197,8 @@ static void
 free_rcl_context(void *ptr)
 { rcl_context_t *context = ptr;
 
-  if ( ptr == default_context )
-    default_context = NULL;
+  if ( ptr == rclswi_default_context_ptr )
+    rclswi_default_context_ptr = NULL;
 
   if ( context->impl )
   { if ( rcl_context_is_valid(context) )
@@ -256,17 +233,16 @@ ros_init(term_t Context, term_t Args, term_t DomainId)
 
   if ( PL_skip_list(Args, 0, &num_args) == PL_LIST )
   { rcl_allocator_t allocator = rcl_get_default_allocator();
-    const char **arg_values = NULL;
+    char **arg_values = NULL;
     term_t tail = PL_copy_term_ref(Args);
     term_t head = PL_new_term_ref();
-    char **argp = (char**)arg_values;
     int rc = TRUE;
 
     if ( num_args > 0 &&
 	 !(arg_values=rcl_alloc(sizeof(*arg_values)*num_args, NULL)) )
       return FALSE;
 
-    for( ; PL_get_list_ex(tail, head, tail); argp++)
+    for(char **argp = arg_values; PL_get_list_ex(tail, head, tail); argp++)
     { if ( !PL_get_chars(head, argp, CVT_ATOMIC|CVT_EXCEPTION|REP_UTF8) )
 	OUTFAIL;
     }
@@ -278,7 +254,10 @@ ros_init(term_t Context, term_t Args, term_t DomainId)
 #ifdef HAVE_RCL_INIT_OPTIONS_SET_DOMAIN_ID
     TRY(rcl_init_options_set_domain_id(&init_options, (size_t)domain_id));
 #endif
-    TRY(rcl_init(num_args, arg_values, &init_options, context));
+    TRY(rcl_init(num_args, (const char**)arg_values, &init_options, context));
+    int unparsed = rcl_arguments_get_count_unparsed_ros(&context->global_arguments);
+    if ( unparsed > 0 )
+      Sdprintf("ROS: %d options were not parsed\n");
 
   out:
     rcl_free(arg_values, NULL);
@@ -386,15 +365,15 @@ rclswi_parse_args(term_t list, rcl_arguments_t *parsed_args)
   int rc = TRUE;
   int unparsed;
 
-  if ( !rclswi_get_arglist(list, &num_args, &arg_values, &default_allocator) )
+  if ( !rclswi_get_arglist(list, &num_args, &arg_values, &rclswi_default_allocator) )
     return FALSE;
 
-  TRY(rcl_parse_arguments(num_args, (const char**)arg_values, default_allocator, parsed_args));
+  TRY(rcl_parse_arguments(num_args, (const char**)arg_values, rclswi_default_allocator, parsed_args));
   if ( (unparsed=rcl_arguments_get_count_unparsed_ros(parsed_args)) > 0 )
   { Sdprintf("TBD: Unparsed arguments\n");
   }
 
-  free_rcl_arglist(arg_values, num_args, &default_allocator);
+  free_rcl_arglist(arg_values, num_args, &rclswi_default_allocator);
   return rc;
 }
 
@@ -419,7 +398,7 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
   rcl_arguments_t arguments = rcl_get_zero_initialized_arguments();
   int use_global_arguments = TRUE;
   int local_arguments = FALSE;
-  int enable_rosout = FALSE;
+  int enable_rosout = TRUE;
   char *node_name;
   char *namespace = "";
   int rc = TRUE;
@@ -439,10 +418,13 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
     if ( PL_get_name_arity(head, &name, &arity) && arity == 1)
     { _PL_get_arg(1, head, arg);
 
-      if ( name == ATOM_cli_args )
+      if ( name == ATOM_argv )
       { if ( !rclswi_parse_args(arg, &arguments) )
 	  OUTFAIL;
 	local_arguments = TRUE;
+      } else if ( name == ATOM_rosout )
+      { if ( !PL_get_bool_ex(arg, &enable_rosout) )
+	  OUTFAIL;
       }
     } else
     { return PL_type_error("option", head);
@@ -505,6 +487,10 @@ ros_node_prop(term_t Node, term_t Prop, term_t Value)
   { const char *namespace = rcl_node_get_namespace(node);
     if ( namespace )
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, namespace);
+  } else if ( prop == ATOM_logger_name )
+  { const char *logger_name = rcl_node_get_logger_name(node);
+    if ( logger_name )
+      return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, logger_name);
   }
 
   return FALSE;
@@ -1667,7 +1653,7 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   DEBUG(3, Sdprintf("rcl_wait(): %d subscriptions\n", nsubs));
   TRY(rcl_wait_set_init(&wset,
 			nsubs, nguards, ntimers, nclients, nservices, nevents,
-			default_context, rcl_get_default_allocator()));
+			rclswi_default_context(), rcl_get_default_allocator()));
   int wset_initted = TRUE;
 
   rcl_ret_t ret = RCL_RET_TIMEOUT;
@@ -1729,7 +1715,7 @@ ros_client_names_and_types_by_node(term_t Node,
     return FALSE;
 
   TRY(rcl_get_client_names_and_types_by_node(
-	  node, &default_allocator, node_name, namespace,
+	  node, &rclswi_default_allocator, node_name, namespace,
 	  &nat));
 
   if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
@@ -1750,7 +1736,7 @@ ros_topic_names_and_types(term_t Node, term_t NamesAndTypes)
     return FALSE;
 
   rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
-  TRY(rcl_get_topic_names_and_types(node, &default_allocator, FALSE, &nat));
+  TRY(rcl_get_topic_names_and_types(node, &rclswi_default_allocator, FALSE, &nat));
 
   if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
     OUTFAIL;
@@ -1778,12 +1764,12 @@ ros_rwm_implementation(term_t Impl)
 		 *	       UTIL		*
 		 *******************************/
 
-static void *
+void *
 rcl_alloc(size_t bytes, rcl_allocator_t *allocator)
 { void *ptr;
 
   if ( !allocator )
-    allocator = &default_allocator;
+    allocator = &rclswi_default_allocator;
 
   if ( (ptr=allocator->allocate(bytes, allocator->state)) )
     return ptr;
@@ -1791,15 +1777,15 @@ rcl_alloc(size_t bytes, rcl_allocator_t *allocator)
   return PL_resource_error("memory"),NULL;
 }
 
-static void
+void
 rcl_free(void *ptr, rcl_allocator_t *allocator)
 { if ( !allocator )
-    allocator = &default_allocator;
+    allocator = &rclswi_default_allocator;
 
   allocator->deallocate(ptr, allocator->state);
 }
 
-static int
+int
 get_utf8_name_ex(term_t t, char **name)
 { return PL_get_chars(t, name, CVT_ATOMIC|CVT_EXCEPTION|REP_UTF8);
 }
@@ -1810,10 +1796,7 @@ get_utf8_name_ex(term_t t, char **name)
 		 *	      REGISTER		*
 		 *******************************/
 
-#define MKFUNCTOR(n,a) \
-        FUNCTOR_ ## n ## a = PL_new_functor(PL_new_atom(#n), a)
-#define MKATOM(n) \
-	ATOM_ ## n = PL_new_atom(#n);
+extern void	install_ros_logging(void);
 
 install_t
 install_librclswi(void)
@@ -1823,13 +1806,15 @@ install_librclswi(void)
   MKFUNCTOR(list, 2);
   FUNCTOR_minus2 = PL_new_functor(PL_new_atom("-"), 2);
 
-  MKATOM(cli_args);
+  MKATOM(argv);
   MKATOM(inf);
   MKATOM(infinite);
   MKATOM(name);
   MKATOM(namespace);
+  MKATOM(logger_name);
+  MKATOM(rosout);
 
-  default_allocator = rcl_get_default_allocator();
+  rclswi_default_allocator = rcl_get_default_allocator();
 
   PL_register_foreign("ros_debug",          1, ros_debug,          0);
 
@@ -1860,4 +1845,7 @@ install_librclswi(void)
   PL_register_foreign("ros_rwm_implementation", 1, ros_rwm_implementation, 0);
 
   PL_register_foreign("ros_identifier_prolog", 2, ros_identifier_prolog, 0);
+
+					/* install helpers */
+  install_ros_logging();
 }

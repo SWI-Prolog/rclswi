@@ -10,7 +10,7 @@
 
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
 
 pub :-
     ros_publisher('/sequence',

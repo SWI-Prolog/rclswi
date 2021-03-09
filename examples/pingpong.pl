@@ -16,7 +16,7 @@ to zero we send a thread message that we are done.
 
 Use two terminals.  Start using
 
-    swipl -p foreign=install/rclswi/lib src/rclswi/examples/pingpong.pl
+    swipl -p library=install/rclswi/prolog src/rclswi/examples/pingpong.pl
 
 Run this in one terminal:
 
@@ -32,7 +32,7 @@ Indicating a round trip time of 46   microseconds, where each round trip
 implies two publish and two receive events.
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
 
 pingpong(Start) :-
     ros_publisher('/ping',

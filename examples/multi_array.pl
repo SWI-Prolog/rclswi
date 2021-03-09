@@ -21,7 +21,7 @@ description of the dimensions. This representation is deprecated, but to
 us useful for illustrating handling of complex ROS message types.
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
 
 %!  pub(+Labels, +Data) is det.
 %

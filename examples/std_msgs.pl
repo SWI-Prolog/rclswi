@@ -17,7 +17,7 @@
 
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- reexport(library(ros)).
 
 test_std_msgs :-
     run_tests([std_msgs]).

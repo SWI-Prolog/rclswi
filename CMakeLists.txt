@@ -34,12 +34,13 @@ find_package(rmw_implementation_cmake REQUIRED)
 # Only build the library if a C typesupport exists
 get_rmw_typesupport(typesupport_impls "rmw_implementation" LANGUAGE "c")
 if(typesupport_impls STREQUAL "")
-  message(STATUS "Skipping rclpy because no C typesupport library was found.")
+  message(STATUS "Skipping rclswi because no C typesupport library was found.")
   return()
 endif()
 
 add_library(rclswi SHARED
   src/rclswi.c
+  src/logging.c
   src/pointer.c
 )
 target_link_libraries(rclswi
@@ -69,6 +70,9 @@ install(PROGRAMS scripts/rclswi
 )
 install(FILES prolog/ros.pl
   DESTINATION prolog
+)
+install(FILES prolog/ros/logging.pl
+  DESTINATION prolog/ros
 )
 
 ament_package()
