@@ -19,7 +19,7 @@ __WARNING__
 
 From your ROS2 workspace, assuming default directory structure
 
-    swipl -p foreign=install/rclswi/lib src/rclswi/examples/demo.pl
+    swipl -p library=install/rclswi/prolog src/rclswi/examples/demo.pl
 
 See the `demo.pl` file for details.
 
@@ -133,11 +133,11 @@ type introspection.  Missing:
 
   - Type handling
     - Convert message from C to Prolog
-      - Deal with arrays
+      - [x] Deal with arrays
         - [x] Fixed arrays
-	- Dynamic arrays
+	- [x] Dynamic arrays
       - Deal with wide strings (are these UTF-16?)
-    - Convert message from Prolog to C
+    - [x] Convert message from Prolog to C
       See https://github.com/osrf/dynamic_message_introspection
     - At the moment dict key names are created on the fly from the
       type introspection data.  This is needlessly slow.
@@ -150,6 +150,11 @@ type introspection.  Missing:
   - Graph tracking
     - Query the ROS node graph (partially implemented)
     - Monitor changes (manage the graph in the Prolog db)
+  - Deal with logging
+    - [x] configure and generate ROS log messages
+    - [x] Bridge from SWI-Prolog `print_message/2` and `debug/3`
+    - print_message/2 forwarding should only be to /rosout
+    - Defaults should depend on whether a session is interactive
   - Deal with services
   - Deal with actions
   - Deal with timers
@@ -157,14 +162,14 @@ type introspection.  Missing:
     - Provide access to the QoS policies
   - Threads (Executors)
     - Thread-per-node model?
-  - ROS2 Lifecycle support
+  - ROS2 Lifecycle support?
   - Integration into ROS deployment
     - Build, portability
       - Find the right SWI-Prolog
       - Use `rclutils` to get some portable alternatives
     - Allow running a ROS node interactively from Prolog
-      - Make sure SWI-Prolog finds library(ros) and the
-        C part of it.
+      -	Make installation follow the SWI-Prolog _pack_
+        structure so we can attach the ROS API as a pack.
     - Allow deploying a ROS node using `ros2 run`
       - How to do that?
       - Pass command line options into `rcl_init()` and `rcl_node_init()`
