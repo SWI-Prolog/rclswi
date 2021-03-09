@@ -2,9 +2,8 @@
 
 __WARNING__
 
-> This is not (yet)  a  useful  ROS2   client.  Currently  it  can  only
-> subscribe to a topic and  handle  messages   on  this  topic  with the
-> exception of those holding dynamic arrays.
+> This is not (yet) a useful ROS2 client. Currently it only handles the
+> ROS publish/subscribe API and the logging API.
 >
 > We plan to turn this into a full   client. If you want to help, please
 > have a look at the TODO list at the end of this README.
@@ -21,7 +20,9 @@ From your ROS2 workspace, assuming default directory structure
 
     swipl -p library=install/rclswi/prolog src/rclswi/examples/demo.pl
 
-See the `demo.pl` file for details.
+See the `demo.pl` file for details.   The  `examples` directory contains
+several  examples.  Some  (still)   rely    on   non-standard  interface
+definitions.
 
 
 ## Design
@@ -131,49 +132,51 @@ The current version is a proof of   concept.  It demonstrates we can use
 `rcl` and `rmw` to access ROS2 and   convert  messages into Prolog using
 type introspection.  Missing:
 
-  - Type handling
-    - Convert message from C to Prolog
+  - [ ] Type handling
+    - [ ] Convert message from C to Prolog
       - [x] Deal with arrays
         - [x] Fixed arrays
 	- [x] Dynamic arrays
-      - Deal with wide strings (are these UTF-16?)
+      - [ ] Deal with wide strings (are these UTF-16?)
     - [x] Convert message from Prolog to C
       See https://github.com/osrf/dynamic_message_introspection
-    - At the moment dict key names are created on the fly from the
+    - [ ] At the moment dict key names are created on the fly from the
       type introspection data.  This is needlessly slow.
-    - Should we allow the user to tweak the conversion by
+    - [ ] Should we allow the user to tweak the conversion by
       providing dict tags and keys and choices for text conversion
       (atom/string)?
-  - Parameter tracking
-    - Allow read/write of parameters
-    - Maintain a copy of a parameter in Prolog that is automatically updated.
-  - Graph tracking
-    - Query the ROS node graph (partially implemented)
-    - Monitor changes (manage the graph in the Prolog db)
-  - Deal with logging
+  - [ ] Object live-time handling, i.e., make nodes depend on objects
+        associated with the node handle.
+  - [ ] Parameter tracking
+    - [ ] Allow read/write of parameters
+    - [ ] Maintain a copy of a parameter in Prolog that is automatically updated.
+  - [ ] Graph tracking
+    - [ ] Query the ROS node graph (partially implemented)
+    - [ ] Monitor changes (manage the graph in the Prolog db)
+  - [ ] Deal with logging
     - [x] configure and generate ROS log messages
     - [x] Bridge from SWI-Prolog `print_message/2` and `debug/3`
-    - print_message/2 forwarding should only be to /rosout
-    - Defaults should depend on whether a session is interactive
-  - Deal with services
-  - Deal with actions
-  - Deal with timers
-  - Advanced configuration
-    - Provide access to the QoS policies
-  - Threads (Executors)
-    - Thread-per-node model?
-  - ROS2 Lifecycle support?
-  - Integration into ROS deployment
-    - Build, portability
-      - Find the right SWI-Prolog
-      - Use `rclutils` to get some portable alternatives
-    - Allow running a ROS node interactively from Prolog
+    - [ ] print_message/2 forwarding should only be to /rosout
+    - [ ] Defaults should depend on whether a session is interactive
+  - [ ] Deal with services
+  - [ ] Deal with actions
+  - [ ] Deal with timers
+  - [ ] Advanced configuration
+    - [ ] Provide access to the QoS policies
+  - [ ] Threads (Executors)
+    - [ ] Thread-per-node model?
+  - [ ] ROS2 Lifecycle support?
+  - [ ] Integration into ROS deployment
+    - [ ] Build, portability
+      - [ ] Find the right SWI-Prolog
+      - [ ] Use `rclutils` to get some portable alternatives
+    - [ ] Allow running a ROS node interactively from Prolog
       -	Make installation follow the SWI-Prolog _pack_
         structure so we can attach the ROS API as a pack.
-    - Allow deploying a ROS node using `ros2 run`
-      - How to do that?
-      - Pass command line options into `rcl_init()` and `rcl_node_init()`
-      - Provide a skeleton project
-  - Documentation
-  - Testing
-  - Performance evaluation
+    - [ ] Allow deploying a ROS node using `ros2 run`
+      - [ ] How to do that?
+      - [ ] Pass command line options into `rcl_init()` and `rcl_node_init()`
+      - [ ] Provide a skeleton project
+  - [ ] Documentation
+  - [ ] Testing
+  - [ ] Performance evaluation
