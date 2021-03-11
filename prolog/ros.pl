@@ -125,7 +125,7 @@ ros_subscribe(Topic, CallBack, Options) :-
     ros_msg_type_support(MsgType, TypeSupport),
     qos_profile(QoSProfile, Options),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription),
-    assert(waitable(subscription(Topic), Node, Subscription, CallBack)).
+    register_waitable(subscription(Topic), Node, Subscription, CallBack).
 
 message_type(_Topic, MsgType, Options) :-
     option(message_type(MsgType), Options),
@@ -178,6 +178,14 @@ ros_publisher(Topic, Options) :-
     '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
     assert(node_object(subscription(Topic), Node, Subscription)).
 
+%!  register_waitable(+Type, +Node, +Object, +Callback) is det.
+%
+%   Register a waitable object with Node. If   we  run (_spin_) the node
+%   this calls ros_ready(Type, Object, CallBack)
+
+register_waitable(Type, Node, Object, Callback) :-
+    assert(waitable(Type, Node, Object, Callback)).
+
 %!  ros_spin is det.
 %!  ros_spin(+Node) is det.
 %
@@ -222,6 +230,8 @@ waitables_on(Node) :-
 %   Wait for all waitable objects  registered   with  Node  and call the
 %   callbacks associated with the ready objects.   Fails if there are no
 %   objects to wait for or TimeOut is exceeded.
+%
+%   @tbd Cache current set of waitables
 
 ros_spin_once(Node, TimeOut) :-
     findall(Obj, waitable(_Type, Node, Obj, _Callback), WaitFor),
@@ -232,14 +242,25 @@ ros_spin_once(Node, TimeOut) :-
 ros_ready(Obj) :-
     waitable(Type, _Node, Obj, CallBack),
     !,
-    ros_ready(Type, Obj, CallBack).
+    catch_with_backtrace(
+        ros_ready_det(Type, Obj, CallBack),
+        Error,
+        print_message(warning, Error)).
+
+ros_ready_det(Type, Obj, CallBack) :-
+    ros_ready(Type, Obj, CallBack),
+    !.
+ros_ready_det(Type, Obj, CallBack) :-
+    print_message(warning,
+                  ros(callback_failed(ros_ready(Type, Obj, CallBack)))).
+
+
+:- multifile
+    ros_ready/3.
 
 ros_ready(subscription(_), Subscription, CallBack) :-
     ros_take(Subscription, Message, _MsgInfo),
-    catch_with_backtrace(
-        ignore(call(CallBack, Message)),
-        Error,
-        print_message(warning, Error)).
+    call(CallBack, Message).
 
 
 		 /*******************************

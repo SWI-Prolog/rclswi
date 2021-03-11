@@ -23,6 +23,9 @@ typedef struct c_pointer_type
 
 int	unify_pointer(term_t t, void *ptr, const c_pointer_type *type);
 int	get_pointer(term_t t, void **ptr, const c_pointer_type *type);
-int	get_pointer_ex(term_t t, void **ptr, atom_t *symbol, const c_pointer_type **type);
+int	get_pointer_and_symbol(term_t t, void **ptr, atom_t *symbol,
+			       const c_pointer_type *type);
+int	get_pointer_ex(term_t t, void **ptr, atom_t *symbol,
+		       const c_pointer_type **type);
 
 #endif /*SWI_POINTER_H_INCLUDED*/

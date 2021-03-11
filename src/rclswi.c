@@ -78,6 +78,7 @@ static atom_t ATOM_source_timestamp;
 static atom_t ATOM_received_timestamp;
 static atom_t ATOM_writer_guid;
 static atom_t ATOM_sequence_number;
+static atom_t ATOM_node;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -894,6 +895,8 @@ typedef struct
 { rcl_service_t      service;			/* Must be first */
   rcl_node_t        *node;
   rclswi_srv_type_t *type_support;
+  atom_t	     node_symbol;		/* Node blob */
+  atom_t	     name;			/* Service name */
   int		     waiting;
   int		     deleted;
 } rclswi_service_t;
@@ -901,6 +904,9 @@ typedef struct
 static void
 free_rcl_service(void *ptr)
 { rclswi_service_t *service = ptr;
+
+  PL_unregister_atom(service->node_symbol);
+  PL_unregister_atom(service->name);
 
   TRYVOID(rcl_service_fini(&service->service, service->node));
 }
@@ -914,8 +920,9 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
   rclswi_srv_type_t *srv_type;
   rclswi_service_t *service;
   rcl_service_options_t service_ops = rcl_service_get_default_options();
+  atom_t node_symbol;
 
-  if ( !get_pointer(Node, (void**)&node, &node_type) )
+  if ( !get_pointer_and_symbol(Node, (void**)&node, &node_symbol, &node_type) )
     return FALSE;
   if ( !get_pointer(SrvType, (void**)&srv_type, &rclswi_srv_type_type) )
     return FALSE;
@@ -927,6 +934,8 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
   service->service      = rcl_get_zero_initialized_service();
   service->node	        = node;
   service->type_support = srv_type;
+  service->name		= PL_new_atom(service_name);
+  service->node_symbol  = node_symbol;
   service->waiting      = FALSE;
   service->deleted      = FALSE;
 
@@ -934,12 +943,32 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
 		      srv_type->type_support, service_name, &service_ops));
 
   if ( !rc )
-    free(service);
-  else
+  { free(service);
+    PL_unregister_atom(service->name);
+  } else
+  { PL_register_atom(service->node_symbol);
     rc = unify_pointer(Service, service, &service_type);
+  }
 
   return rc;
 }
+
+static foreign_t
+ros_service_prop(term_t Service, term_t Key, term_t Value)
+{ rclswi_service_t *service;
+  atom_t key;
+
+  if ( get_pointer(Service, (void**)&service, &service_type) &&
+       PL_get_atom_ex(Key, &key) )
+  { if ( key == ATOM_node )
+      return PL_unify_atom(Value, service->node_symbol);
+    else if ( key == ATOM_name )
+      return PL_unify_atom(Value, service->name);
+  }
+
+  return FALSE;
+}
+
 
 static void
 free_rwm_service_info(void* ptr)
@@ -2273,6 +2302,7 @@ install_librclswi(void)
   MKATOM(received_timestamp);
   MKATOM(writer_guid);
   MKATOM(sequence_number);
+  MKATOM(node);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 
@@ -2294,6 +2324,7 @@ install_librclswi(void)
   PL_register_foreign("$ros_message_type",	 4, ros_message_type,	    0);
   PL_register_foreign("$ros_service_type",	 6, ros_service_type,	    0);
   PL_register_foreign("$ros_type_introspection", 2, ros_type_introspection, 0);
+  PL_register_foreign("$ros_service_prop",       3, ros_service_prop,       0);
 
   PL_register_foreign("ros_wait",		 3, ros_wait,		    0);
   PL_register_foreign("ros_service_is_ready",	 1, ros_service_is_ready,   0);
