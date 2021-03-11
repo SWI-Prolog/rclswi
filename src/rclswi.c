@@ -69,6 +69,15 @@ static atom_t ATOM_name;
 static atom_t ATOM_namespace;
 static atom_t ATOM_logger_name;
 static atom_t ATOM_rosout;
+static atom_t ATOM_service;
+static atom_t ATOM_request;
+static atom_t ATOM_response;
+static atom_t ATOM_service_info;
+static atom_t ATOM_request_id;
+static atom_t ATOM_source_timestamp;
+static atom_t ATOM_received_timestamp;
+static atom_t ATOM_writer_guid;
+static atom_t ATOM_sequence_number;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -85,6 +94,9 @@ static void free_rcl_context(void*);
 static void free_rcl_node(void*);
 static void free_rcl_publisher(void*);
 static void free_rcl_subscription(void*);
+static void free_rcl_client(void*);
+static void free_rcl_service(void*);
+static void free_rwm_service_info(void*);
 
 static const c_pointer_type context_type =
 { "rcl_context_t",
@@ -107,7 +119,27 @@ static const c_pointer_type subscription_type =
 };
 
 static const c_pointer_type rclswi_message_type_type =
-{ "rclswi_message_type_t",
+{ "rcl_message_type_t",
+  NULL
+};
+
+static const c_pointer_type client_type =
+{ "rcl_client_t",
+  free_rcl_client
+};
+
+static const c_pointer_type service_type =
+{ "rcl_service_t",
+  free_rcl_service
+};
+
+static const c_pointer_type rwm_service_info_type =
+{ "rmw_service_info_t",
+  free_rwm_service_info
+};
+
+static const c_pointer_type rclswi_srv_type_type =
+{ "rclswi_service_type_t",
   NULL
 };
 
@@ -614,7 +646,7 @@ ros_subscribe(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
     return FALSE;
   if ( !get_pointer(MsgType, (void**)&msg_type, &rclswi_message_type_type) )
     return FALSE;
-  if ( !PL_get_chars(Topic, &topic, CVT_ATOM|CVT_STRING|CVT_EXCEPTION|REP_UTF8) )
+  if ( !get_utf8_name_ex(Topic, &topic) )
     return FALSE;
 
   if ( !(sub = malloc(sizeof(*sub))) )
@@ -674,6 +706,309 @@ ros_take(term_t Subscription, term_t Message, term_t MsgInfo)
 
   (*sub->type_support->fini)(msg);
   (*sub->type_support->destroy)(msg);
+
+  return rc;
+}
+
+
+		 /*******************************
+		 *       SERVICES (CLIENT)	*
+		 *******************************/
+
+typedef struct
+{ rcl_client_t      client;			/* Must be first */
+  rcl_node_t        *node;
+  rclswi_srv_type_t *type_support;
+  int		     waiting;
+  int		     deleted;
+} rclswi_client_t;
+
+
+static void
+free_rcl_client(void *ptr)
+{ rclswi_client_t *client = ptr;
+
+  TRYVOID(rcl_client_fini(&client->client, client->node));
+}
+
+
+static foreign_t
+ros_create_client(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
+		  term_t Client)
+{ rcl_node_t *node;
+  int rc = TRUE;
+  char *service_name;
+  rclswi_srv_type_t *srv_type;
+  rclswi_client_t *client;
+  rcl_client_options_t client_ops = rcl_client_get_default_options();
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) )
+    return FALSE;
+  if ( !get_pointer(SrvType, (void**)&srv_type, &rclswi_srv_type_type) )
+    return FALSE;
+  if ( !get_utf8_name_ex(Name, &service_name) )
+    return FALSE;
+
+  if ( !(client = malloc(sizeof(*client))) )
+    return PL_resource_error("memory");
+  client->client       = rcl_get_zero_initialized_client();
+  client->node	       = node;
+  client->type_support = srv_type;
+  client->waiting      = FALSE;
+  client->deleted      = FALSE;
+
+  TRY(rcl_client_init(&client->client, node,
+		      srv_type->type_support, service_name, &client_ops));
+
+  if ( !rc )
+    free(client);
+  else
+    rc = unify_pointer(Client, client, &client_type);
+
+  return rc;
+}
+
+
+static foreign_t
+ros_send_request(term_t Client, term_t Message, term_t SeqNumber)
+{ rclswi_client_t *client;
+  int64_t seq_number;
+  void *msg = NULL;
+  int rc = TRUE;
+
+  if ( !get_pointer(Client, (void**)&client, &client_type) )
+    return FALSE;
+
+  const rclswi_message_type_t *msg_type = &client->type_support->request;
+  msg = (*msg_type->create)();
+  (*msg_type->init)(msg);
+
+  if ( (rc=fill_message(Message, msg, msg_type->introspection, FALSE)) )
+    TRY(rcl_send_request(&client->client, msg, &seq_number));
+
+  (*msg_type->fini)(msg);
+  (*msg_type->destroy)(msg);
+
+  return rc && PL_unify_int64(SeqNumber, seq_number);
+}
+
+
+static foreign_t
+ros_service_is_ready(term_t Client)
+{ rclswi_client_t *client;
+  int rc = TRUE;
+  bool is_ready;
+
+  if ( !get_pointer(Client, (void**)&client, &client_type) )
+    return FALSE;
+
+  TRY(rcl_service_server_is_available(client->node, &client->client, &is_ready));
+
+  return rc && is_ready;
+}
+
+
+static void
+put_hex(char **out, uint8_t byte)
+{ static const char hexd[] = "0123456789abcdef";
+
+  *(*out)++ = hexd[(byte>>4)&0xf];
+  *(*out)++ = hexd[(byte)&0xf];
+}
+
+static int
+put_guid(term_t t, const uint8_t guid[16])
+{ char out[36];
+  char *o = out;
+
+  for(int i=0; i<16; i++)
+  { put_hex(&o, guid[i]);
+    if ( i == 3 || i == 5 || i == 7 || i == 9 )
+      *o++ = '-';
+  }
+
+  return PL_put_atom_nchars(t, 36, out);
+}
+
+static int
+put_time_stamp(term_t t, int64_t stamp)
+{ double d = (double)stamp/1000000000.0;
+
+  return PL_unify_float(t, d);
+}
+
+
+static int
+put_rmw_service_info(term_t t, const rmw_service_info_t *header)
+{ const atom_t reqid_keys[] = { ATOM_writer_guid, ATOM_sequence_number };
+  const atom_t hdr_keys[] = { ATOM_source_timestamp, ATOM_received_timestamp,
+			      ATOM_request_id };
+  term_t reqid_values = PL_new_term_refs(2);
+  term_t hdr_values = PL_new_term_refs(3);
+
+  return
+  ( (reqid_values = PL_new_term_refs(2)) &&
+    (hdr_values = PL_new_term_refs(3)) &&
+    put_guid(reqid_values+0, (const uint8_t*)header->request_id.writer_guid) &&
+    PL_put_int64(reqid_values+1, header->request_id.sequence_number) &&
+    put_time_stamp(hdr_values+0, header->source_timestamp) &&
+    put_time_stamp(hdr_values+1, header->received_timestamp) &&
+    PL_put_dict(hdr_values+2, ATOM_request_id, 2, reqid_keys, reqid_values) &&
+    PL_put_dict(t, ATOM_service_info, 3, hdr_keys, hdr_values) &&
+    (PL_reset_term_refs(reqid_values),TRUE)
+  );
+}
+
+static foreign_t
+ros_take_response(term_t Client, term_t Message, term_t MessageInfo)
+{ rclswi_client_t *client;
+  rmw_service_info_t header;
+  void *msg = NULL;
+  int rc = TRUE;
+  term_t result = PL_new_term_ref();
+
+  if ( !get_pointer(Client, (void**)&client, &client_type) )
+    return FALSE;
+
+  const rclswi_message_type_t *msg_type = &client->type_support->response;
+  msg = (*msg_type->create)();
+  (*msg_type->init)(msg);
+
+  TRY(rcl_take_response_with_info(&client->client, &header, msg));
+  rc = rc && put_message(result, msg, msg_type->introspection)
+	  && PL_unify(Message, result)
+          && put_rmw_service_info(result, &header)
+	  && PL_unify(MessageInfo, result);
+
+  (*msg_type->fini)(msg);
+  (*msg_type->destroy)(msg);
+
+  return rc;
+}
+
+		 /*******************************
+		 *       SERVICES (SERVER)	*
+		 *******************************/
+
+typedef struct
+{ rcl_service_t      service;			/* Must be first */
+  rcl_node_t        *node;
+  rclswi_srv_type_t *type_support;
+  int		     waiting;
+  int		     deleted;
+} rclswi_service_t;
+
+static void
+free_rcl_service(void *ptr)
+{ rclswi_service_t *service = ptr;
+
+  TRYVOID(rcl_service_fini(&service->service, service->node));
+}
+
+static foreign_t
+ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
+		   term_t Service)
+{ rcl_node_t *node;
+  int rc = TRUE;
+  char *service_name;
+  rclswi_srv_type_t *srv_type;
+  rclswi_service_t *service;
+  rcl_service_options_t service_ops = rcl_service_get_default_options();
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) )
+    return FALSE;
+  if ( !get_pointer(SrvType, (void**)&srv_type, &rclswi_srv_type_type) )
+    return FALSE;
+  if ( !get_utf8_name_ex(Name, &service_name) )
+    return FALSE;
+
+  if ( !(service = malloc(sizeof(*service))) )
+    return PL_resource_error("memory");
+  service->service      = rcl_get_zero_initialized_service();
+  service->node	        = node;
+  service->type_support = srv_type;
+  service->waiting      = FALSE;
+  service->deleted      = FALSE;
+
+  TRY(rcl_service_init(&service->service, node,
+		      srv_type->type_support, service_name, &service_ops));
+
+  if ( !rc )
+    free(service);
+  else
+    rc = unify_pointer(Service, service, &service_type);
+
+  return rc;
+}
+
+static void
+free_rwm_service_info(void* ptr)
+{ rmw_service_info_t *header = ptr;
+
+  free(header);
+}
+
+static foreign_t
+ros_service_info_to_prolog(term_t Header, term_t Dict)
+{ rmw_service_info_t *header;
+  term_t tmp = PL_new_term_ref();
+
+  return ( get_pointer(Header, (void**)&header, &rwm_service_info_type) &&
+	   put_rmw_service_info(tmp, header) &&
+	   PL_unify(tmp, Dict) );
+}
+
+static foreign_t
+ros_send_response(term_t Service, term_t Message, term_t Header)
+{ rclswi_service_t *service;
+  void *msg = NULL;
+  int rc = TRUE;
+  rmw_service_info_t *header = NULL;
+
+  if ( !get_pointer(Service, (void**)&service, &service_type) ||
+       !get_pointer(Header,  (void**)&header,  &rwm_service_info_type) )
+    return FALSE;
+
+  const rclswi_message_type_t *msg_type = &service->type_support->response;
+  msg = (*msg_type->create)();
+  (*msg_type->init)(msg);
+
+  if ( (rc=fill_message(Message, msg, msg_type->introspection, FALSE)) )
+    TRY(rcl_send_response(&service->service, &header->request_id, msg));
+
+  (*msg_type->fini)(msg);
+  (*msg_type->destroy)(msg);
+
+  return rc;
+}
+
+static foreign_t
+ros_take_request(term_t Service, term_t Message, term_t MessageInfo)
+{ rclswi_service_t *service;
+  rmw_service_info_t *header = NULL;
+  void *msg = NULL;
+  int rc = TRUE;
+  term_t result = PL_new_term_ref();
+
+  if ( !get_pointer(Service, (void**)&service, &service_type) )
+    return FALSE;
+  if ( !(header = malloc(sizeof(*header))) )
+    return PL_resource_error("memory");
+
+  const rclswi_message_type_t *msg_type = &service->type_support->request;
+  msg = (*msg_type->create)();
+  (*msg_type->init)(msg);
+
+  TRY(rcl_take_request_with_info(&service->service, header, msg));
+  rc = rc && put_message(result, msg, msg_type->introspection)
+	  && PL_unify(Message, result)
+          && unify_pointer(MessageInfo, header, &rwm_service_info_type);
+
+  (*msg_type->fini)(msg);
+  (*msg_type->destroy)(msg);
+
+  if ( !rc && header )
+    free(header);
 
   return rc;
 }
@@ -743,23 +1078,60 @@ unify_rcl_names_and_types(term_t t, rcl_names_and_types_t *names_and_types)
 
 static void *
 msg_func(char *name, char *end, const char *postfix)
-{ strcpy(end, postfix);
+{ void *ret;
 
-  return dlsym(RTLD_DEFAULT, name);
+  strcpy(end, postfix);
+
+  if ( !(ret=dlsym(RTLD_DEFAULT, name)) )
+    DEBUG(1, Sdprintf("Cannot find symbol '%s'\n", name));
+
+  return ret;
 }
 
 static const
-rosidl_message_type_support_t *
-introspection_func(char *name)
+void *
+introspection_func(const char *name)
 { void *sym = dlsym(RTLD_DEFAULT, name);
 
   if ( sym )
-  { const rosidl_message_type_support_t *(*func)(void) = sym;
+  { const void*(*func)(void) = sym;
 
     return (*func)();
+  } else
+  { DEBUG(1, Sdprintf("Cannot find symbol '%s'\n", name));
   }
 
   return NULL;
+}
+
+static int
+msg_type_functions(rclswi_message_type_t *type,
+		   const char *prefix,
+		   const char *introspection,
+		   const char *type_support)
+{ char buf[512];
+  char *end;
+
+  if ( strlen(prefix) > sizeof(buf)-16 )
+    return PL_representation_error("symbol_name_length");
+
+  strcpy(buf, prefix);
+  end = buf+strlen(buf);
+
+  if ( !(type->init	     = msg_func(buf, end, "__init"))      ||
+       !(type->create        = msg_func(buf, end, "__create"))    ||
+       !(type->fini          = msg_func(buf, end, "__fini"))      ||
+       !(type->destroy       = msg_func(buf, end, "__destroy"))   ||
+       !(type->introspection = introspection_func(introspection)) )
+    return FALSE;
+  if ( type_support )
+  { if ( !(type->type_support  = introspection_func(type_support)) )
+      return FALSE;
+  } else
+  { type->type_support = NULL;
+  }
+
+  return TRUE;
 }
 
 
@@ -779,22 +1151,7 @@ ros_message_type(term_t Introspection, term_t TypeSupport,
       return PL_representation_error("symbol_name_length");
 
     if ( (ret = malloc(sizeof(*ret))) )
-    { char buf[512];
-      char *end;
-
-      strcpy(buf, prefix);
-      end = buf+strlen(buf);
-
-      if ( !(ret->init	        = msg_func(buf, end, "__init"))              ||
-	   !(ret->create        = msg_func(buf, end, "__create"))            ||
-	   !(ret->fini          = msg_func(buf, end, "__fini"))              ||
-	   !(ret->destroy       = msg_func(buf, end, "__destroy"))           ||
-	   !(ret->seq_init	= msg_func(buf, end, "__Sequence__init"))    ||
-	   !(ret->seq_create    = msg_func(buf, end, "__Sequence__create"))  ||
-	   !(ret->seq_fini      = msg_func(buf, end, "__Sequence__fini"))    ||
-	   !(ret->seq_destroy   = msg_func(buf, end, "__Sequence__destroy")) ||
-	   !(ret->introspection = introspection_func(introspection))         ||
-	   !(ret->type_support  = introspection_func(type_support)) )
+    { if ( !msg_type_functions(ret, prefix, introspection, type_support) )
       { free(ret);
 	return FALSE;
       }
@@ -805,6 +1162,43 @@ ros_message_type(term_t Introspection, term_t TypeSupport,
 
   return FALSE;
 }
+
+
+static foreign_t
+ros_service_type(term_t IntrospectionRequest,
+		 term_t IntrospectionResponse,
+		 term_t TypeSupport,
+		 term_t PrefixRequest,
+		 term_t PrefixResponse,
+		 term_t Functions)
+{ char *prefix_req;
+  char *prefix_res;
+  char *introsp_req;
+  char *introsp_res;
+  char *type_support;
+
+  if ( get_utf8_name_ex(PrefixRequest, &prefix_req) &&
+       get_utf8_name_ex(PrefixResponse, &prefix_res) &&
+       get_utf8_name_ex(IntrospectionRequest, &introsp_req) &&
+       get_utf8_name_ex(IntrospectionResponse, &introsp_res) &&
+       get_utf8_name_ex(TypeSupport, &type_support) )
+  { rclswi_srv_type_t *ret;
+
+    if ( (ret = malloc(sizeof(*ret))) )
+    { if ( !(ret->type_support = introspection_func(type_support)) ||
+	   !msg_type_functions(&ret->request,  prefix_req, introsp_req, NULL) ||
+	   !msg_type_functions(&ret->response, prefix_res, introsp_res, NULL) )
+      { free(ret);
+	return FALSE;
+      }
+
+      return unify_pointer(Functions, ret, &rclswi_srv_type_type);
+    }
+  }
+
+  return FALSE;
+}
+
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 rosidl_typesupport_introspection_c__get_message_type_support_handle__" + package + "__msg__" + name;
@@ -1007,15 +1401,34 @@ put_type(term_t t, const rosidl_message_type_support_t *ts)
 
 
 static foreign_t
-ros_type_introspection(term_t MsgFuctions, term_t Type)
-{ rclswi_message_type_t *msg_type;
-  term_t tmp = PL_new_term_ref();
+ros_type_introspection(term_t TypeBlob, term_t Type)
+{ void *ptr;
+  atom_t blob;
+  const c_pointer_type *type;
 
-  if ( !get_pointer(MsgFuctions, (void**)&msg_type, &rclswi_message_type_type) )
+  if ( get_pointer_ex(TypeBlob, &ptr, &blob, &type) )
+  { term_t tmp = PL_new_term_ref();
+    int rc;
+
+    if ( type == &rclswi_message_type_type )
+    { rclswi_message_type_t *msg_type = ptr;
+
+      rc = put_type(tmp, msg_type->introspection);
+    } else if ( type == &rclswi_srv_type_type )
+    { rclswi_srv_type_t *srv_type = ptr;
+      atom_t keys[] = {ATOM_request, ATOM_response};
+      term_t values = PL_new_term_refs(2);
+
+      rc = ( put_type(values+0, srv_type->request.introspection) &&
+	     put_type(values+1, srv_type->response.introspection) &&
+	     PL_put_dict(tmp, ATOM_service, 2, keys, values) );
+    } else
+    { return PL_type_error("ros_type", TypeBlob);
+    }
+
+    return rc && PL_unify(Type, tmp);
+  } else
     return FALSE;
-
-  return ( put_type(tmp, msg_type->introspection) &&
-	   PL_unify(Type, tmp) );
 }
 
 
@@ -1540,12 +1953,11 @@ out:
 typedef struct wait_obj
 { c_pointer_type *ctype;
   union
-  { rcl_subscription_t    *subscription;
-    rclswi_subscription_t *swi_subscription;
+  { rclswi_subscription_t *swi_subscription;
     rcl_guard_condition_t *guard_condition;
     rcl_timer_t           *timer;
-    rcl_client_t          *client;
-    rcl_service_t	  *service;
+    rclswi_client_t       *client;
+    rclswi_service_t	  *service;
     rcl_event_t		  *events;
     void                  *ptr;
   } obj;				/* The pointer */
@@ -1581,6 +1993,18 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
       { sub->waiting = TRUE;
 	TRY(rcl_wait_set_add_subscription(wset, &sub->subscription, NULL));
       }
+    } else if ( objs[i].ctype == &client_type )
+    { rclswi_client_t *client = objs[i].obj.client;
+      if ( !client->deleted )
+      { client->waiting = TRUE;
+	TRY(rcl_wait_set_add_client(wset, &client->client, NULL));
+      }
+    } else if ( objs[i].ctype == &service_type )
+    { rclswi_service_t *service = objs[i].obj.service;
+      if ( !service->deleted )
+      { service->waiting = TRUE;
+	TRY(rcl_wait_set_add_service(wset, &service->service, NULL));
+      }
     } else
       assert(0);
   }
@@ -1596,6 +2020,16 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
       sub->waiting = FALSE;
       if ( sub->deleted )
 	TRY_ANYWAY(rcl_subscription_fini(&sub->subscription, sub->node));
+    } else if ( objs[i].ctype == &client_type )
+    { rclswi_client_t *client = objs[i].obj.client;
+      client->waiting = FALSE;
+      if ( client->deleted )
+	TRY_ANYWAY(rcl_client_fini(&client->client, client->node));
+    } else if ( objs[i].ctype == &service_type )
+    { rclswi_service_t *service = objs[i].obj.service;
+      service->waiting = FALSE;
+      if ( service->deleted )
+	TRY_ANYWAY(rcl_service_fini(&service->service, service->node));
     } else
       assert(0);
   }
@@ -1643,6 +2077,10 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
 
     if ( objs[i].ctype == &subscription_type )
       nsubs++;
+    else if ( objs[i].ctype == &client_type )
+      nclients++;
+    else if ( objs[i].ctype == &service_type )
+      nservices++;
     else
       assert(0);
   }
@@ -1650,7 +2088,10 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
     OUTFAIL;
 
   rcl_wait_set_t wset = rcl_get_zero_initialized_wait_set();
-  DEBUG(3, Sdprintf("rcl_wait(): %d subscriptions\n", nsubs));
+  DEBUG(3, Sdprintf("rcl_wait(): %d subscriptions; "
+				"%d clients; ",
+				"%d services\n",
+		    nsubs, nclients, nservices));
   TRY(rcl_wait_set_init(&wset,
 			nsubs, nguards, ntimers, nclients, nservices, nevents,
 			rclswi_default_context(), rcl_get_default_allocator()));
@@ -1680,6 +2121,16 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   for(int i = 0; i < nsubs; i++)
   { if ( wset.subscriptions[i] &&
 	 !add_to_ready(tail, head, len, objs, wset.subscriptions[i]) )
+      OUTFAIL;
+  }
+  for(int i = 0; i < nclients; i++)
+  { if ( wset.clients[i] &&
+	 !add_to_ready(tail, head, len, objs, wset.clients[i]) )
+      OUTFAIL;
+  }
+  for(int i = 0; i < nservices; i++)
+  { if ( wset.services[i] &&
+	 !add_to_ready(tail, head, len, objs, wset.services[i]) )
       OUTFAIL;
   }
   if ( !PL_unify_nil_ex(tail) )
@@ -1813,38 +2264,57 @@ install_librclswi(void)
   MKATOM(namespace);
   MKATOM(logger_name);
   MKATOM(rosout);
+  MKATOM(service);
+  MKATOM(request);
+  MKATOM(response);
+  MKATOM(service_info);
+  MKATOM(request_id);
+  MKATOM(source_timestamp);
+  MKATOM(received_timestamp);
+  MKATOM(writer_guid);
+  MKATOM(sequence_number);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 
-  PL_register_foreign("ros_debug",          1, ros_debug,          0);
+  PL_register_foreign("ros_debug",		 1, ros_debug,		    0);
 
-  PL_register_foreign("ros_create_context", 1, ros_create_context, 0);
-  PL_register_foreign("ros_init",           3, ros_init,	   0);
-  PL_register_foreign("$ros_shutdown",	    1, ros_shutdown,       0);
-  PL_register_foreign("ros_ok",             1, ros_ok,             0);
-  PL_register_foreign("ros_create_node",    4, ros_create_node,    0);
-  PL_register_foreign("ros_node_fini",      1, ros_node_fini,      0);
-  PL_register_foreign("$ros_node_prop",     3, ros_node_prop,      0);
-  PL_register_foreign("$ros_publisher",     5, ros_publisher,      0);
-  PL_register_foreign("$ros_subscribe",     5, ros_subscribe,      0);
-  PL_register_foreign("$ros_unsubscribe",   1, ros_unsubscribe,    0);
+  PL_register_foreign("ros_create_context",	 1, ros_create_context,	    0);
+  PL_register_foreign("ros_init",		 3, ros_init,		    0);
+  PL_register_foreign("$ros_shutdown",		 1, ros_shutdown,	    0);
+  PL_register_foreign("ros_ok",			 1, ros_ok,		    0);
+  PL_register_foreign("ros_create_node",	 4, ros_create_node,	    0);
+  PL_register_foreign("ros_node_fini",		 1, ros_node_fini,	    0);
+  PL_register_foreign("$ros_node_prop",		 3, ros_node_prop,	    0);
+  PL_register_foreign("$ros_publisher",		 5, ros_publisher,	    0);
+  PL_register_foreign("$ros_subscribe",		 5, ros_subscribe,	    0);
+  PL_register_foreign("$ros_unsubscribe",	 1, ros_unsubscribe,	    0);
+  PL_register_foreign("$ros_create_client",	 5, ros_create_client,	    0);
+  PL_register_foreign("$ros_create_service",	 5, ros_create_service,	    0);
 
-  PL_register_foreign("$ros_message_type",  4, ros_message_type,   0);
-  PL_register_foreign("$ros_type_introspection", 2, ros_type_introspection,  0);
+  PL_register_foreign("$ros_message_type",	 4, ros_message_type,	    0);
+  PL_register_foreign("$ros_service_type",	 6, ros_service_type,	    0);
+  PL_register_foreign("$ros_type_introspection", 2, ros_type_introspection, 0);
+
+  PL_register_foreign("ros_wait",		 3, ros_wait,		    0);
+  PL_register_foreign("ros_service_is_ready",	 1, ros_service_is_ready,   0);
+
+  PL_register_foreign("ros_take",		 3, ros_take,		    0);
+  PL_register_foreign("ros_take_request",	 3, ros_take_request,	    0);
+  PL_register_foreign("ros_take_response",	 3, ros_take_response,	    0);
+  PL_register_foreign("$ros_publish",		 2, ros_publish,	    0);
+  PL_register_foreign("ros_send_request",	 3, ros_send_request,	    0);
+  PL_register_foreign("ros_send_response",	 3, ros_send_response,	    0);
+  PL_register_foreign("ros_service_info_to_prolog", 2,
+		      ros_service_info_to_prolog, 0);
+
+  PL_register_foreign("ros_rwm_implementation",	 1, ros_rwm_implementation, 0);
+
+  PL_register_foreign("ros_identifier_prolog",	 2, ros_identifier_prolog,  0);
 
   PL_register_foreign("ros_client_names_and_types_by_node", 4,
 		      ros_client_names_and_types_by_node, 0);
   PL_register_foreign("ros_topic_names_and_types", 2,
 		      ros_topic_names_and_types, 0);
-
-  PL_register_foreign("ros_wait",	    3, ros_wait,	   0);
-
-  PL_register_foreign("ros_take",	    3, ros_take,           0);
-  PL_register_foreign("$ros_publish",	    2, ros_publish,        0);
-
-  PL_register_foreign("ros_rwm_implementation", 1, ros_rwm_implementation, 0);
-
-  PL_register_foreign("ros_identifier_prolog", 2, ros_identifier_prolog, 0);
 
 					/* install helpers */
   install_ros_logging();

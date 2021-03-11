@@ -83,8 +83,10 @@ type introspection to dynamically translate  ROS2 messages to SWI-Prolog
 dict objects.
 */
 
-type_support_function_prefix(
+type_support_function_prefix(msg,
     rosidl_typesupport_c__get_message_type_support_handle).
+type_support_function_prefix(srv,
+    rosidl_typesupport_c__get_service_type_support_handle).
 type_introspection_function_prefix(
     rosidl_typesupport_introspection_c__get_message_type_support_handle).
 
@@ -120,7 +122,7 @@ type_introspection_function_prefix(
 ros_subscribe(Topic, CallBack, Options) :-
     message_type(Topic, MsgType, Options),
     node(Node, Options),
-    ros_type_support(MsgType, TypeSupport),
+    ros_msg_type_support(MsgType, TypeSupport),
     qos_profile(QoSProfile, Options),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription),
     assert(waitable(subscription(Topic), Node, Subscription, CallBack)).
@@ -171,7 +173,7 @@ ros_publish(Topic, Message) :-
 ros_publisher(Topic, Options) :-
     message_type(Topic, MsgType, Options),
     node(Node, Options),
-    ros_type_support(MsgType, TypeSupport),
+    ros_msg_type_support(MsgType, TypeSupport),
     qos_profile(QoSProfile, Options),
     '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
     assert(node_object(subscription(Topic), Node, Subscription)).
@@ -468,7 +470,7 @@ ros_property_node(logger_name(Name), Node) :-
 %   Create a publisher for the given topic.
 
 ros_publisher(Node, MsgType, Topic, QoSProfile, Publisher) :-
-    ros_type_support(MsgType, TypeSupport),
+    ros_msg_type_support(MsgType, TypeSupport),
     '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Publisher).
 
 %!  ros_subscribe(+Node, +MsgType, +Topic, +QoSProfile, -Subscription)
@@ -476,33 +478,60 @@ ros_publisher(Node, MsgType, Topic, QoSProfile, Publisher) :-
 %   Create a subscription for the given topic.
 
 ros_subscribe(Node, MsgType, Topic, QoSProfile, Subscription) :-
-    ros_type_support(MsgType, TypeSupport),
+    ros_msg_type_support(MsgType, TypeSupport),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription).
 
-%!  ros_type_support(+MsgType, -TypeSupport)
+%!  ros_msg_type_support(+MsgType, -TypeSupport) is det.
+%!  ros_srv_type_support(+SrvType, -TypeSupport) is det.
 %
-%   Get the RCL type support  description   from  MsgType. MsgType is an
-%   atom or term of the form Package/Kind/Type. For example:
+%   Get the RCL type support description for  a message type or service.
+%   MsgType is an atom  or  term   of  the  form  Package/Kind/Type. For
+%   example:
 %
-%      ?- ros_type_support('std_msgs/msg/Int64', Type).
-%      Type = <rcl_type_support>(0x7fbc66896210).
+%      ?- ros_msg_type_support('std_msgs/msg/Int64', Type).
+%      Type = <rcl_message_type_t>(0x7fbc66896210).
 %
 %   @tbd We plan to make this more Prolog friendly by providing defaults
 %   for the Package and Kind  components   and  case  conversion for the
 %   actual type.
 
-:- table ( ros_type_support/2,
+:- table ( ros_msg_type_support/2,
+           ros_srv_type_support/2,
            load_type_support_shared_object/3
          ) as shared.
 
-ros_type_support(MsgType, MsgFunctions) :-
-    type_support_function_prefix(TSPrefix),
+ros_type_support(Type, TypeBlob) :-
+    type_support_function(Type, _Package, FuncPostfix),
+    (   sub_atom(FuncPostfix, _, _, _, '__msg__')
+    ->  ros_msg_type_support(Type, TypeBlob)
+    ;   sub_atom(FuncPostfix, _, _, _, '__srv__')
+    ->  ros_srv_type_support(Type, TypeBlob)
+    ;   domain_error(ros_type, Type)
+    ).
+
+ros_msg_type_support(MsgType, MsgFunctions) :-
+    type_support_function_prefix(msg, TSPrefix),
     type_introspection_function_prefix(ISPrefix),
     type_support_function(MsgType, Package, FuncPostfix),
     load_type_support(Package),
     atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
     atomic_list_concat([ISPrefix, FuncPostfix], '__', ISFunc),
     '$ros_message_type'(ISFunc, TSFunc, FuncPostfix, MsgFunctions).
+
+ros_srv_type_support(SrvType, SrvFunctions) :-
+    type_support_function_prefix(srv, TSPrefix),
+    type_introspection_function_prefix(ISPrefix),
+    type_support_function(SrvType, Package, FuncPostfix),
+    load_type_support(Package),
+    atom_concat(FuncPostfix, '_Request', FuncPostfixRequest),
+    atom_concat(FuncPostfix, '_Response', FuncPostfixResponse),
+    atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
+    atomic_list_concat([ISPrefix, FuncPostfixRequest], '__', ISFuncRequest),
+    atomic_list_concat([ISPrefix, FuncPostfixResponse], '__', ISFuncResponse),
+    '$ros_service_type'(ISFuncRequest, ISFuncResponse,
+                        TSFunc,
+                        FuncPostfixRequest, FuncPostfixResponse,
+                        SrvFunctions).
 
 type_support_function(MsgType, Package, FuncPostfix) :-
     phrase(segments(MsgType), Segments),
@@ -548,10 +577,12 @@ rwm_c_identifier(Id) :-
     split_string(RWM_ID, "_", "", [_,MW,_]),
     atom_concat(MW, '_c', Id).
 
-%!  ros_type_introspection(+MsgType, -Description) is det.
+%!  ros_type_introspection(+RosType, -Description) is det.
 %
-%   Describe MsgType using a Prolog term.   Description  is formatted as
-%   below. All type names are mapped to lowercase.
+%   Describe a ros type using a Prolog term. RosType is either a message
+%   or a service. The type description is   formatted as below. All type
+%   names are mapped to lowercase,   replacing CamelCase word boundaries
+%   with underscores, e.g., `CamelCase` -> `camel_case`.
 %
 %     - A structure is mapped to a SWI-Prolog dict.  The _tag_ is
 %       the structure type name.  The _keys_ represent the fields
@@ -576,10 +607,13 @@ rwm_c_identifier(Id) :-
 %         stamp:time{nanosec:uint32,sec:int32}
 %       }
 %    ```
+%
+%    If RosType is a service, Description is   a  dict of type `service`
+%    with the keys `request` and `response`.
 
-ros_type_introspection(MsgType, Description) :-
-    ros_type_support(MsgType, MsgFunctions),
-    '$ros_type_introspection'(MsgFunctions, Description).
+ros_type_introspection(Type, Description) :-
+    ros_type_support(Type, TypeBlob),
+    '$ros_type_introspection'(TypeBlob, Description).
 
 
 %!  ros_client_names_and_types_by_node(+Node, +NodeName, +NameSpace, -NamesAndTypes)

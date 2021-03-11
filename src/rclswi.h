@@ -23,11 +23,12 @@ typedef struct rclswi_message_type_t
   void  (*init)(void*);
   void  (*destroy)(void*);
   void  (*fini)(void*);
-  void* (*seq_create)();
-  void  (*seq_init)(void*, size_t size);
-  void  (*seq_destroy)(void*);
-  void  (*seq_fini)(void*);
 } rclswi_message_type_t;
 
+typedef struct rclswi_srv_type_t
+{ const rosidl_service_type_support_t *type_support;
+  rclswi_message_type_t request;
+  rclswi_message_type_t response;
+} rclswi_srv_type_t;
 
 #endif /*RCLSWI_H_INCLUDED*/

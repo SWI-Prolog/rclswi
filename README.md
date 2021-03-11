@@ -2,8 +2,11 @@
 
 __WARNING__
 
-> This is not (yet) a useful ROS2 client. Currently it only handles the
-> ROS publish/subscribe API and the logging API.
+> This is not (yet) a useful ROS2 client. Currently it only handles
+>
+>   - The publish/subscribe API
+>   - The logging API.
+>   - The low-level services API (client and service).
 >
 > We plan to turn this into a full   client. If you want to help, please
 > have a look at the TODO list at the end of this README.
@@ -159,6 +162,16 @@ type introspection.  Missing:
     - [ ] print_message/2 forwarding should only be to /rosout
     - [ ] Defaults should depend on whether a session is interactive
   - [ ] Deal with services
+        - [x] Low level interface: read/write request/response, wait for
+	      client and service.
+	- [ ] High level interface.
+	  - [ ] Client
+	    - [x] Synchronous calls
+	    - [ ] ASynchronous calls
+	  - [ ] Service
+	    - [ ] Read/compute/reply loop
+	    - [ ] Read/compute/reply loop using multiple threads
+	    - [ ] Callback based
   - [ ] Deal with actions
   - [ ] Deal with timers
   - [ ] Advanced configuration
@@ -177,6 +190,9 @@ type introspection.  Missing:
       - [ ] How to do that?
       - [ ] Pass command line options into `rcl_init()` and `rcl_node_init()`
       - [ ] Provide a skeleton project
+  - [ ] Process cleanup
+        - [ ] Properly handle signals asynchronously (Control-C)
+	- [ ] Finish and reclaim resources in the right order.
   - [ ] Documentation
   - [ ] Testing
   - [ ] Performance evaluation
