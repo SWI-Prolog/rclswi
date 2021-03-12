@@ -40,7 +40,7 @@
 
             ros_take/3,			% +Subscription, -Message, -MessageInfo
 
-            ros_client_names_and_types_by_node/4, % +Node, +NodeName, +NameSpace, -NamesAndTypes
+            ros_client_names_and_types/4, % +Node, +NodeName, +NameSpace, -NamesAndTypes
             ros_property/1,             % ?Property
             ros_debug/1,                % +Level
             ros_default_context/1,      % -Context

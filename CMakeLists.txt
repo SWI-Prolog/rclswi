@@ -73,6 +73,7 @@ install(FILES prolog/ros.pl
 )
 install(FILES prolog/ros/logging.pl
 	      prolog/ros/services.pl
+	      prolog/ros/clocks.pl
   DESTINATION prolog/ros
 )
 

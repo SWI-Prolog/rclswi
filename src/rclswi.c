@@ -62,6 +62,7 @@ static int	put_message(term_t Message, void *msg,
 static int	fill_message(term_t Message, void *msg,
 			     const rosidl_message_type_support_t *ts,
 			     int noarray);
+static int	get_timeout_nsec(term_t Timeout, int64_t *tmo);
 
 static atom_t ATOM_argv;
 static atom_t ATOM_inf;
@@ -84,6 +85,12 @@ static atom_t ATOM_goal;
 static atom_t ATOM_result;
 static atom_t ATOM_feedback;
 static atom_t ATOM_action;
+static atom_t ATOM_ros;
+static atom_t ATOM_system;
+static atom_t ATOM_steady;
+static atom_t ATOM_clock;
+static atom_t ATOM_context;
+static atom_t ATOM_type;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -102,6 +109,9 @@ static void free_rcl_publisher(void*);
 static void free_rcl_subscription(void*);
 static void free_rcl_client(void*);
 static void free_rcl_service(void*);
+static void free_rcl_clock(void*);
+static void free_rcl_action_client(void*);
+static void free_rcl_action_server(void*);
 static void free_rwm_service_info(void*);
 
 static const c_pointer_type context_type =
@@ -137,6 +147,21 @@ static const c_pointer_type client_type =
 static const c_pointer_type service_type =
 { "rcl_service_t",
   free_rcl_service
+};
+
+static const c_pointer_type clock_type =
+{ "rcl_clock_t",
+  free_rcl_clock
+};
+
+static const c_pointer_type action_client_type =
+{ "rcl_action_client_t",
+  free_rcl_action_client
+};
+
+static const c_pointer_type action_server_type =
+{ "rcl_action_server_t",
+  free_rcl_action_server
 };
 
 static const c_pointer_type rwm_service_info_type =
@@ -845,7 +870,7 @@ static int
 put_time_stamp(term_t t, int64_t stamp)
 { double d = (double)stamp/1000000000.0;
 
-  return PL_unify_float(t, d);
+  return PL_put_float(t, d);
 }
 
 
@@ -953,8 +978,8 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
 		      srv_type->type_support, service_name, &service_ops));
 
   if ( !rc )
-  { free(service);
-    PL_unregister_atom(service->name);
+  { PL_unregister_atom(service->name);
+    free(service);
   } else
   { PL_register_atom(service->node_symbol);
     rc = unify_pointer(Service, service, &service_type);
@@ -1051,6 +1076,295 @@ ros_take_request(term_t Service, term_t Message, term_t MessageInfo)
 
   return rc;
 }
+
+		 /*******************************
+		 *	      CLOCK		*
+		 *******************************/
+
+typedef struct
+{ rcl_clock_t clock;
+  atom_t context_symbol;
+  atom_t type;
+} rclswi_clock_t;
+
+static void
+free_rcl_clock(void *ptr)
+{ rclswi_clock_t *clock = ptr;
+
+  /* no need to unregister ->type as this is a global atom */
+  TRYVOID(rcl_clock_fini(&clock->clock));
+}
+
+static foreign_t
+ros_create_clock(term_t Context, term_t Type, term_t Clock)
+{ rcl_context_t *context;
+  rcl_clock_type_t type;
+  int rc = TRUE;
+  atom_t type_a;
+  atom_t context_symbol;
+  rclswi_clock_t *clock;
+
+  if ( !get_pointer_and_symbol(Context, (void**)&context, &context_symbol, &context_type) )
+    return FALSE;
+  if ( PL_get_atom_ex(Type, &type_a) )
+  { if ( type_a == ATOM_ros )
+      type = RCL_ROS_TIME;
+    else if ( type_a == ATOM_system )
+      type = RCL_SYSTEM_TIME;
+    else if ( type_a == ATOM_steady )
+      type = RCL_STEADY_TIME;
+    else
+      return PL_domain_error("ros_clock_type", Type);
+  }
+
+  if ( !(clock = malloc(sizeof(*clock))) )
+    return PL_resource_error("memory");
+  clock->type = type_a;
+  clock->context_symbol = context_symbol;
+
+  TRY(rcl_clock_init(type, &clock->clock, &rclswi_default_allocator));
+
+  if ( rc )
+  { PL_register_atom(clock->context_symbol);
+    rc = unify_pointer(Clock, clock, &clock_type);
+  }
+
+  return rc;
+}
+
+static int
+unify_time_stamp(term_t t, int64_t stamp)
+{ double d = (double)stamp/1000000000.0;
+
+  return PL_unify_float(t, d);
+}
+
+static foreign_t
+ros_clock_prop(term_t Clock, term_t Key, term_t Value)
+{ rclswi_clock_t *clock;
+  atom_t key;
+
+  if ( get_pointer(Clock, (void**)&clock, &clock_type) &&
+       PL_get_atom_ex(Key, &key) )
+  { if ( key == ATOM_context )
+      return PL_unify_atom(Value, clock->context_symbol);
+    else if ( key == ATOM_type )
+      return PL_unify_atom(Value, clock->type);
+  }
+
+  return FALSE;
+}
+
+static foreign_t
+ros_clock_time(term_t Clock, term_t Time)
+{ int rc = TRUE;
+  rclswi_clock_t *clock;
+  rcl_time_point_value_t now;
+
+  if ( !get_pointer(Clock, (void**)&clock, &clock_type) )
+    return FALSE;
+
+  TRY(rcl_clock_get_now(&clock->clock, &now));
+
+  return rc && unify_time_stamp(Time, now);
+}
+
+
+		 /*******************************
+		 *	 ACTIONS (CLIENT)	*
+		 *******************************/
+
+typedef struct
+{ rcl_action_client_t   action_client;			/* Must be first */
+  rcl_node_t           *node;
+  rclswi_action_type_t *type_support;
+  atom_t		node_symbol;
+  atom_t		name;
+  int		        waiting;
+  int		        deleted;
+} rclswi_action_client_t;
+
+
+static void
+free_rcl_action_client(void *ptr)
+{ rclswi_action_client_t *client = ptr;
+
+  PL_unregister_atom(client->node_symbol);
+  PL_unregister_atom(client->name);
+
+  TRYVOID(rcl_action_client_fini(&client->action_client, client->node));
+}
+
+
+static foreign_t
+ros_create_action_client(term_t Node, term_t ActType, term_t Name,
+			 term_t QoSDict,
+			 term_t ActionClient)
+{ rcl_node_t *node;
+  int rc = TRUE;
+  char *action_name;
+  rclswi_action_type_t *action_type;
+  rclswi_action_client_t *action_client;
+  rcl_action_client_options_t action_ops;
+  atom_t node_symbol;
+
+  if ( !get_pointer_and_symbol(Node, (void**)&node, &node_symbol, &node_type) )
+    return FALSE;
+  if ( !get_pointer(ActType, (void**)&action_type, &rclswi_action_type_type) )
+    return FALSE;
+  if ( !get_utf8_name_ex(Name, &action_name) )
+    return FALSE;
+
+  action_ops = rcl_action_client_get_default_options();
+  /* TBD: Fill QoS options */
+
+  if ( !(action_client = malloc(sizeof(*action_client))) )
+    return PL_resource_error("memory");
+  action_client->action_client = rcl_action_get_zero_initialized_client();
+  action_client->node	       = node;
+  action_client->type_support  = action_type;
+  action_client->name	       = PL_new_atom(action_name);
+  action_client->node_symbol   = node_symbol;
+  action_client->waiting       = FALSE;
+  action_client->deleted       = FALSE;
+
+  TRY(rcl_action_client_init(
+	  &action_client->action_client, node,
+	  action_type->type_support, action_name, &action_ops));
+
+  if ( !rc )
+  { PL_unregister_atom(action_client->name);
+    free(action_client);
+  } else
+  { PL_register_atom(action_client->node_symbol);
+    rc = unify_pointer(ActionClient, action_client, &action_client_type);
+  }
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_client_prop(term_t ActionClient, term_t Key, term_t Value)
+{ rclswi_action_client_t *action_client;
+  atom_t key;
+
+  if ( get_pointer(ActionClient, (void**)&action_client, &action_client_type) &&
+       PL_get_atom_ex(Key, &key) )
+  { if ( key == ATOM_node )
+      return PL_unify_atom(Value, action_client->node_symbol);
+    else if ( key == ATOM_name )
+      return PL_unify_atom(Value, action_client->name);
+  }
+
+  return FALSE;
+}
+
+		 /*******************************
+		 *	 ACTIONS (SERVER)	*
+		 *******************************/
+
+typedef struct
+{ rcl_action_server_t   action_server;			/* Must be first */
+  rcl_node_t           *node;
+  rclswi_action_type_t *type_support;
+  atom_t		node_symbol;
+  atom_t		clock_symbol;
+  atom_t		name;
+  int		        waiting;
+  int		        deleted;
+} rclswi_action_server_t;
+
+
+static void
+free_rcl_action_server(void *ptr)
+{ rclswi_action_server_t *server = ptr;
+
+  PL_unregister_atom(server->node_symbol);
+  PL_unregister_atom(server->clock_symbol);
+  PL_unregister_atom(server->name);
+
+  TRYVOID(rcl_action_server_fini(&server->action_server, server->node));
+}
+
+
+static foreign_t
+ros_create_action_server(term_t Node, term_t Clock, term_t ActType, term_t Name,
+			 term_t QoSDict, term_t ResultTimeOut,
+			 term_t ActionServer)
+{ rcl_node_t *node;
+  int rc = TRUE;
+  char *action_name;
+  rclswi_action_type_t *action_type;
+  rclswi_action_server_t *action_server;
+  rcl_action_server_options_t action_ops;
+  atom_t node_symbol;
+  atom_t clock_symbol;
+  int64_t tmo_nsec;
+  rclswi_clock_t *clock = NULL;
+
+  if ( !get_pointer_and_symbol(Node, (void**)&node, &node_symbol, &node_type) )
+    return FALSE;
+  if ( !get_pointer_and_symbol(Clock, (void**)&clock, &clock_symbol, &clock_type) )
+    return FALSE;
+  if ( !get_pointer(ActType, (void**)&action_type, &rclswi_action_type_type) )
+    return FALSE;
+  if ( !get_utf8_name_ex(Name, &action_name) )
+    return FALSE;
+  if ( !get_timeout_nsec(ResultTimeOut, &tmo_nsec) )
+    return FALSE;
+
+  action_ops = rcl_action_server_get_default_options();
+  /* TBD: Fill QoS options */
+  action_ops.result_timeout.nanoseconds = tmo_nsec;
+
+  if ( !(action_server = malloc(sizeof(*action_server))) )
+    return PL_resource_error("memory");
+  action_server->action_server = rcl_action_get_zero_initialized_server();
+  action_server->node	       = node;
+  action_server->type_support  = action_type;
+  action_server->name	       = PL_new_atom(action_name);
+  action_server->node_symbol   = node_symbol;
+  action_server->clock_symbol  = clock_symbol;
+  action_server->waiting       = FALSE;
+  action_server->deleted       = FALSE;
+
+  TRY(rcl_action_server_init(
+	  &action_server->action_server, node,
+	  &clock->clock,
+	  action_type->type_support, action_name, &action_ops));
+
+  if ( !rc )
+  { PL_unregister_atom(action_server->name);
+    free(action_server);
+  } else
+  { PL_register_atom(action_server->node_symbol);
+    PL_register_atom(action_server->clock_symbol);
+    rc = unify_pointer(ActionServer, action_server, &action_server_type);
+  }
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_server_prop(term_t ActionClient, term_t Key, term_t Value)
+{ rclswi_action_server_t *action_server;
+  atom_t key;
+
+  if ( get_pointer(ActionClient, (void**)&action_server, &action_server_type) &&
+       PL_get_atom_ex(Key, &key) )
+  { if ( key == ATOM_node )
+      return PL_unify_atom(Value, action_server->node_symbol);
+    else if ( key == ATOM_name )
+      return PL_unify_atom(Value, action_server->name);
+    else if ( key == ATOM_clock )
+      return PL_unify_atom(Value, action_server->clock_symbol);
+  }
+
+  return FALSE;
+}
+
 
 
 		 /*******************************
@@ -2129,12 +2443,32 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
 }
 
 
+static int
+get_timeout_nsec(term_t Timeout, int64_t *tmo)
+{ double tmo_sec;
+
+  if ( PL_get_float(Timeout, &tmo_sec) )
+  { *tmo = (int64_t)(tmo_sec*1000000000.0);
+    return TRUE;
+  } else
+  { atom_t inf;
+
+    if ( PL_get_atom(Timeout, &inf) &&
+	 (inf == ATOM_inf || inf == ATOM_infinite) )
+    { *tmo = -1;
+      return TRUE;
+    } else
+    { return PL_type_error("float", Timeout);
+    }
+  }
+}
+
+
 #define WAIT_POLL 250000000
 
 static foreign_t
 ros_wait(term_t For, term_t Timeout, term_t Ready)
-{ double tmo_sec;
-  int64_t tmo_nsec;
+{ int64_t tmo_nsec;
   term_t tail = PL_copy_term_ref(For);
   term_t head = PL_new_term_ref();
   int rc = TRUE;
@@ -2143,19 +2477,8 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   int i;
   size_t nsubs=0, nguards=0, ntimers=0, nclients=0, nservices=0, nevents=0;
 
-  if ( PL_get_float(Timeout, &tmo_sec) )
-  { tmo_nsec = (int64_t)(tmo_sec*1000000000.0);
-  } else
-  { atom_t inf;
-
-    if ( PL_get_atom(Timeout, &inf) &&
-	 (inf == ATOM_inf || inf == ATOM_infinite) )
-    { tmo_nsec = -1;
-    } else
-    { return PL_type_error("float", Timeout);
-    }
-  }
-
+  if ( !get_timeout_nsec(Timeout, &tmo_nsec) )
+    return FALSE;
   if ( PL_skip_list(For, 0, &len) != PL_LIST )
     return PL_type_error("list", For);
   if ( !(objs = malloc(sizeof(*objs)*len)) )
@@ -2242,9 +2565,9 @@ out:
 		 *******************************/
 
 static foreign_t
-ros_client_names_and_types_by_node(term_t Node,
-				   term_t NodeName, term_t NameSpace,
-				   term_t NamesAndTypes)
+ros_client_names_and_types(term_t Node,
+			   term_t NodeName, term_t NameSpace,
+			   term_t NamesAndTypes)
 { rcl_node_t *node;
   char *node_name;
   char *namespace;
@@ -2369,50 +2692,62 @@ install_librclswi(void)
   MKATOM(result);
   MKATOM(feedback);
   MKATOM(action);
+  MKATOM(ros);
+  MKATOM(system);
+  MKATOM(steady);
+  MKATOM(clock);
+  MKATOM(context);
+  MKATOM(type);
 
   rclswi_default_allocator = rcl_get_default_allocator();
+#define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
 
-  PL_register_foreign("ros_debug",		 1, ros_debug,		    0);
+  PRED("ros_debug",		     1,	ros_debug,		    0);
 
-  PL_register_foreign("ros_create_context",	 1, ros_create_context,	    0);
-  PL_register_foreign("ros_init",		 3, ros_init,		    0);
-  PL_register_foreign("$ros_shutdown",		 1, ros_shutdown,	    0);
-  PL_register_foreign("ros_ok",			 1, ros_ok,		    0);
-  PL_register_foreign("ros_create_node",	 4, ros_create_node,	    0);
-  PL_register_foreign("ros_node_fini",		 1, ros_node_fini,	    0);
-  PL_register_foreign("$ros_node_prop",		 3, ros_node_prop,	    0);
-  PL_register_foreign("$ros_publisher",		 5, ros_publisher,	    0);
-  PL_register_foreign("$ros_subscribe",		 5, ros_subscribe,	    0);
-  PL_register_foreign("$ros_unsubscribe",	 1, ros_unsubscribe,	    0);
-  PL_register_foreign("$ros_create_client",	 5, ros_create_client,	    0);
-  PL_register_foreign("$ros_create_service",	 5, ros_create_service,	    0);
+  PRED("ros_create_context",	     1,	ros_create_context,	    0);
+  PRED("ros_init",		     3,	ros_init,		    0);
+  PRED("$ros_shutdown",		     1,	ros_shutdown,		    0);
+  PRED("ros_ok",		     1,	ros_ok,			    0);
+  PRED("ros_create_node",	     4,	ros_create_node,	    0);
+  PRED("ros_node_fini",		     1,	ros_node_fini,		    0);
+  PRED("$ros_node_prop",	     3,	ros_node_prop,		    0);
+  PRED("$ros_publisher",	     5,	ros_publisher,		    0);
+  PRED("$ros_subscribe",	     5,	ros_subscribe,		    0);
+  PRED("$ros_unsubscribe",	     1,	ros_unsubscribe,	    0);
+  PRED("$ros_create_client",	     5,	ros_create_client,	    0);
+  PRED("$ros_create_service",	     5,	ros_create_service,	    0);
+  PRED("$ros_create_action_client",  5,	ros_create_action_client,   0);
+  PRED("$ros_create_action_server",  7,	ros_create_action_server,   0);
 
-  PL_register_foreign("$ros_message_type",	 4, ros_message_type,	    0);
-  PL_register_foreign("$ros_service_type",	 6, ros_service_type,	    0);
-  PL_register_foreign("$ros_action_type",	 8, ros_action_type,	    0);
-  PL_register_foreign("$ros_type_introspection", 2, ros_type_introspection, 0);
-  PL_register_foreign("$ros_service_prop",       3, ros_service_prop,       0);
+  PRED("ros_create_clock",	     3, ros_create_clock,	    0);
+  PRED("ros_clock_time",	     2, ros_clock_time,		    0);
 
-  PL_register_foreign("ros_wait",		 3, ros_wait,		    0);
-  PL_register_foreign("ros_service_is_ready",	 1, ros_service_is_ready,   0);
+  PRED("$ros_message_type",	     4,	ros_message_type,	    0);
+  PRED("$ros_service_type",	     6,	ros_service_type,	    0);
+  PRED("$ros_action_type",	     8,	ros_action_type,	    0);
+  PRED("$ros_type_introspection",    2,	ros_type_introspection,	    0);
+  PRED("$ros_service_prop",	     3,	ros_service_prop,	    0);
+  PRED("$ros_action_client_prop",    3,	ros_action_client_prop,	    0);
+  PRED("$ros_action_server_prop",    3,	ros_action_server_prop,	    0);
+  PRED("$ros_clock_prop",            3,	ros_clock_prop,	            0);
 
-  PL_register_foreign("ros_take",		 3, ros_take,		    0);
-  PL_register_foreign("ros_take_request",	 3, ros_take_request,	    0);
-  PL_register_foreign("ros_take_response",	 3, ros_take_response,	    0);
-  PL_register_foreign("$ros_publish",		 2, ros_publish,	    0);
-  PL_register_foreign("ros_send_request",	 3, ros_send_request,	    0);
-  PL_register_foreign("ros_send_response",	 3, ros_send_response,	    0);
-  PL_register_foreign("ros_service_info_to_prolog", 2,
-		      ros_service_info_to_prolog, 0);
+  PRED("ros_wait",		     3,	ros_wait,		    0);
+  PRED("ros_service_is_ready",	     1,	ros_service_is_ready,	    0);
 
-  PL_register_foreign("ros_rwm_implementation",	 1, ros_rwm_implementation, 0);
+  PRED("ros_take",		     3,	ros_take,		    0);
+  PRED("ros_take_request",	     3,	ros_take_request,	    0);
+  PRED("ros_take_response",	     3,	ros_take_response,	    0);
+  PRED("$ros_publish",		     2,	ros_publish,		    0);
+  PRED("ros_send_request",	     3,	ros_send_request,	    0);
+  PRED("ros_send_response",	     3,	ros_send_response,	    0);
 
-  PL_register_foreign("ros_identifier_prolog",	 2, ros_identifier_prolog,  0);
+  PRED("ros_rwm_implementation",     1,	ros_rwm_implementation,	    0);
 
-  PL_register_foreign("ros_client_names_and_types_by_node", 4,
-		      ros_client_names_and_types_by_node, 0);
-  PL_register_foreign("ros_topic_names_and_types", 2,
-		      ros_topic_names_and_types, 0);
+  PRED("ros_identifier_prolog",	     2,	ros_identifier_prolog,	    0);
+
+  PRED("ros_service_info_to_prolog", 2,	ros_service_info_to_prolog, 0);
+  PRED("ros_client_names_and_types", 4,	ros_client_names_and_types, 0);
+  PRED("ros_topic_names_and_types",  2,	ros_topic_names_and_types,  0);
 
 					/* install helpers */
   install_ros_logging();

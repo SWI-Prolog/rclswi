@@ -22,7 +22,7 @@
 %!  type is det.
 %!  type(+ActionName) is det.
 %
-%   Fetch and show the request, result and feedback message types for an
+%   Fetch and show the goal, result and   feedback  message types for an
 %   action.
 
 type :-
