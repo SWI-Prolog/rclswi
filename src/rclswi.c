@@ -34,6 +34,7 @@
 #include <rcl/context.h>
 #include <rcl_interfaces/msg/parameter_type.h>
 #include <rcl_yaml_param_parser/parser.h>
+#include <rcl_action/rcl_action.h>
 #include <rcutils/allocator.h>
 #include <rcutils/format_string.h>
 #include <rcutils/macros.h>
@@ -79,6 +80,10 @@ static atom_t ATOM_received_timestamp;
 static atom_t ATOM_writer_guid;
 static atom_t ATOM_sequence_number;
 static atom_t ATOM_node;
+static atom_t ATOM_goal;
+static atom_t ATOM_result;
+static atom_t ATOM_feedback;
+static atom_t ATOM_action;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -141,6 +146,11 @@ static const c_pointer_type rwm_service_info_type =
 
 static const c_pointer_type rclswi_srv_type_type =
 { "rclswi_service_type_t",
+  NULL
+};
+
+static const c_pointer_type rclswi_action_type_type =
+{ "rclswi_action_type_t",
   NULL
 };
 
@@ -1229,6 +1239,49 @@ ros_service_type(term_t IntrospectionRequest,
 }
 
 
+static foreign_t
+ros_action_type(term_t IntrospectionGoal,
+		term_t IntrospectionResult,
+		term_t IntrospectionFeedback,
+		term_t TypeSupport,
+		term_t PrefixGoal,
+		term_t PrefixResult,
+		term_t PrefixFeedback,
+		term_t Functions)
+{ char *prefix_goal;
+  char *prefix_res;
+  char *prefix_fb;
+  char *introsp_goal;
+  char *introsp_res;
+  char *introsp_fb;
+  char *type_support;
+
+  if ( get_utf8_name_ex(PrefixGoal, &prefix_goal) &&
+       get_utf8_name_ex(PrefixResult, &prefix_res) &&
+       get_utf8_name_ex(PrefixFeedback, &prefix_fb) &&
+       get_utf8_name_ex(IntrospectionGoal, &introsp_goal) &&
+       get_utf8_name_ex(IntrospectionResult, &introsp_res) &&
+       get_utf8_name_ex(IntrospectionFeedback, &introsp_fb) &&
+       get_utf8_name_ex(TypeSupport, &type_support) )
+  { rclswi_action_type_t *ret;
+
+    if ( (ret = malloc(sizeof(*ret))) )
+    { if ( !(ret->type_support = introspection_func(type_support)) ||
+	   !msg_type_functions(&ret->goal,     prefix_goal, introsp_goal, NULL) ||
+	   !msg_type_functions(&ret->result,   prefix_res,  introsp_res,  NULL) ||
+	   !msg_type_functions(&ret->feedback, prefix_fb,   introsp_fb,   NULL) )
+      { free(ret);
+	return FALSE;
+      }
+
+      return unify_pointer(Functions, ret, &rclswi_action_type_type);
+    }
+  }
+
+  return FALSE;
+}
+
+
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 rosidl_typesupport_introspection_c__get_message_type_support_handle__" + package + "__msg__" + name;
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
@@ -1451,6 +1504,15 @@ ros_type_introspection(term_t TypeBlob, term_t Type)
       rc = ( put_type(values+0, srv_type->request.introspection) &&
 	     put_type(values+1, srv_type->response.introspection) &&
 	     PL_put_dict(tmp, ATOM_service, 2, keys, values) );
+    } else if ( type == &rclswi_action_type_type )
+    { rclswi_action_type_t *action_type = ptr;
+      atom_t keys[] = {ATOM_goal, ATOM_result, ATOM_feedback};
+      term_t values = PL_new_term_refs(3);
+
+      rc = ( put_type(values+0, action_type->goal.introspection) &&
+	     put_type(values+1, action_type->result.introspection) &&
+	     put_type(values+2, action_type->feedback.introspection) &&
+	     PL_put_dict(tmp, ATOM_action, 3, keys, values) );
     } else
     { return PL_type_error("ros_type", TypeBlob);
     }
@@ -2303,6 +2365,10 @@ install_librclswi(void)
   MKATOM(writer_guid);
   MKATOM(sequence_number);
   MKATOM(node);
+  MKATOM(goal);
+  MKATOM(result);
+  MKATOM(feedback);
+  MKATOM(action);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 
@@ -2323,6 +2389,7 @@ install_librclswi(void)
 
   PL_register_foreign("$ros_message_type",	 4, ros_message_type,	    0);
   PL_register_foreign("$ros_service_type",	 6, ros_service_type,	    0);
+  PL_register_foreign("$ros_action_type",	 8, ros_action_type,	    0);
   PL_register_foreign("$ros_type_introspection", 2, ros_type_introspection, 0);
   PL_register_foreign("$ros_service_prop",       3, ros_service_prop,       0);
 

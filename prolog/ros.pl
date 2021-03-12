@@ -54,6 +54,7 @@
 :- use_module(library(prolog_code)).
 :- use_module(library(option)).
 :- use_module(library(filesex)).
+:- use_module(library(debug)).
 
 :- meta_predicate
     ros_subscribe(+, 1, +).
@@ -87,6 +88,8 @@ type_support_function_prefix(msg,
     rosidl_typesupport_c__get_message_type_support_handle).
 type_support_function_prefix(srv,
     rosidl_typesupport_c__get_service_type_support_handle).
+type_support_function_prefix(action,
+    rosidl_typesupport_c__get_action_type_support_handle).
 type_introspection_function_prefix(
     rosidl_typesupport_introspection_c__get_message_type_support_handle).
 
@@ -527,6 +530,8 @@ ros_type_support(Type, TypeBlob) :-
     ->  ros_msg_type_support(Type, TypeBlob)
     ;   sub_atom(FuncPostfix, _, _, _, '__srv__')
     ->  ros_srv_type_support(Type, TypeBlob)
+    ;   sub_atom(FuncPostfix, _, _, _, '__action__')
+    ->  ros_action_type_support(Type, TypeBlob)
     ;   domain_error(ros_type, Type)
     ).
 
@@ -553,6 +558,24 @@ ros_srv_type_support(SrvType, SrvFunctions) :-
                         TSFunc,
                         FuncPostfixRequest, FuncPostfixResponse,
                         SrvFunctions).
+
+ros_action_type_support(ActType, ActFunctions) :-
+    type_support_function_prefix(action, TSPrefix),
+    type_introspection_function_prefix(ISPrefix),
+    type_support_function(ActType, Package, FuncPostfix),
+    load_type_support(Package),
+    atom_concat(FuncPostfix, '_Goal', FuncPostfixGoal),
+    atom_concat(FuncPostfix, '_Result', FuncPostfixResult),
+    atom_concat(FuncPostfix, '_Feedback', FuncPostfixFeedback),
+    atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
+    atomic_list_concat([ISPrefix, FuncPostfixGoal], '__', ISFuncGoal),
+    atomic_list_concat([ISPrefix, FuncPostfixResult], '__', ISFuncResult),
+    atomic_list_concat([ISPrefix, FuncPostfixFeedback], '__', ISFuncFeedback),
+    '$ros_action_type'(ISFuncGoal, ISFuncResult, ISFuncFeedback,
+                       TSFunc,
+                       FuncPostfixGoal, FuncPostfixResult, FuncPostfixFeedback,
+                       ActFunctions).
+
 
 type_support_function(MsgType, Package, FuncPostfix) :-
     phrase(segments(MsgType), Segments),
@@ -591,6 +614,7 @@ load_type_support(Package) :-
 load_type_support_shared_object(Package, Which, Handle) :-
     current_prolog_flag(shared_object_extension, SO),
     atomic_list_concat([lib,Package,'__',Which, '.', SO], File),
+    debug(ros(type_support), 'Loading type support shared object ~p', [File]),
     open_shared_object(File, Handle, [global]).
 
 rwm_c_identifier(Id) :-
