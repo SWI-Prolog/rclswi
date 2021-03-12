@@ -173,6 +173,10 @@ type introspection.  Missing:
 	    - [ ] Read/compute/reply loop using multiple threads
 	    - [ ] Callback based
   - [ ] Deal with actions
+        - [x] Action time introspection
+	- [x] Low level interface for creating an action client or server
+  - [ ] Deal with clocks
+        - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
   - [ ] Advanced configuration
     - [ ] Provide access to the QoS policies
