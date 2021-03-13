@@ -605,6 +605,13 @@ ros_publisher(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
   if ( !PL_get_chars(Topic, &topic, CVT_ATOM|CVT_STRING|CVT_EXCEPTION|REP_UTF8) )
     return FALSE;
 
+  if ( !PL_is_variable(QoSProfile) )
+  { rmw_qos_profile_t *qos_profile;
+    if ( !get_qos_profile(QoSProfile, &qos_profile) )
+      return FALSE;
+    publisher_ops.qos = *qos_profile;
+  }
+
   if ( !(pub = malloc(sizeof(*pub))) )
     return PL_resource_error("memory");
   pub->publisher = rcl_get_zero_initialized_publisher();
@@ -685,6 +692,13 @@ ros_subscribe(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
     return FALSE;
   if ( !get_utf8_name_ex(Topic, &topic) )
     return FALSE;
+
+  if ( !PL_is_variable(QoSProfile) )
+  { rmw_qos_profile_t *qos_profile;
+    if ( !get_qos_profile(QoSProfile, &qos_profile) )
+      return FALSE;
+    subscription_ops.qos = *qos_profile;
+  }
 
   if ( !(sub = malloc(sizeof(*sub))) )
     return PL_resource_error("memory");
@@ -785,6 +799,13 @@ ros_create_client(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
     return FALSE;
   if ( !get_utf8_name_ex(Name, &service_name) )
     return FALSE;
+
+  if ( !PL_is_variable(QoSProfile) )
+  { rmw_qos_profile_t *qos_profile;
+    if ( !get_qos_profile(QoSProfile, &qos_profile) )
+      return FALSE;
+    client_ops.qos = *qos_profile;
+  }
 
   if ( !(client = malloc(sizeof(*client))) )
     return PL_resource_error("memory");
@@ -964,6 +985,13 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
     return FALSE;
   if ( !get_utf8_name_ex(Name, &service_name) )
     return FALSE;
+
+  if ( !PL_is_variable(QoSProfile) )
+  { rmw_qos_profile_t *qos_profile;
+    if ( !get_qos_profile(QoSProfile, &qos_profile) )
+      return FALSE;
+    service_ops.qos = *qos_profile;
+  }
 
   if ( !(service = malloc(sizeof(*service))) )
     return PL_resource_error("memory");

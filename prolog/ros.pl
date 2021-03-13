@@ -149,8 +149,10 @@ node(Node, _) :-
     ros_default_node(Node).
 
 qos_profile(QoSProfile, Options) :-
-    option(qos(NameOrDict), Options, default),
-    ros_qos_object(NameOrDict, QoSProfile).
+    (   option(qos(NameOrDict), Options)
+    ->  ros_qos_object(NameOrDict, QoSProfile)
+    ;   true
+    ).
 
 %!  ros_unsubscribe(+Topic) is semidet.
 %
