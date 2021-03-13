@@ -42,6 +42,7 @@ add_library(rclswi SHARED
   src/rclswi.c
   src/logging.c
   src/pointer.c
+  src/qos.c
 )
 target_link_libraries(rclswi
   SWIPL::LIBSWIPL
@@ -74,6 +75,7 @@ install(FILES prolog/ros.pl
 install(FILES prolog/ros/logging.pl
 	      prolog/ros/services.pl
 	      prolog/ros/clocks.pl
+	      prolog/ros/qos.pl
   DESTINATION prolog/ros
 )
 

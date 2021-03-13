@@ -53,6 +53,7 @@
 
 #include "common.h"
 #include "rclswi.h"
+#include "qos.h"
 
 rcl_allocator_t rclswi_default_allocator;
 static rcl_context_t  *rclswi_default_context_ptr = NULL;
@@ -1076,6 +1077,7 @@ ros_take_request(term_t Service, term_t Message, term_t MessageInfo)
 
   return rc;
 }
+
 
 		 /*******************************
 		 *	      CLOCK		*
@@ -2751,4 +2753,5 @@ install_librclswi(void)
 
 					/* install helpers */
   install_ros_logging();
+  install_ros_qos();
 }

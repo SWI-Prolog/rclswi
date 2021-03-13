@@ -48,13 +48,16 @@
 
             ros_identifier_prolog/2     % ?RosName, ?PrologName
           ]).
-:- use_module(library(apply)).
-:- use_module(library(error)).
-:- use_module(library(lists)).
-:- use_module(library(prolog_code)).
-:- use_module(library(option)).
-:- use_module(library(filesex)).
-:- use_module(library(debug)).
+:- autoload(library(error),
+            [must_be/2, existence_error/2, domain_error/2, instantiation_error/1]).
+:- autoload(library(apply), [maplist/2]).
+:- autoload(library(filesex), [directory_file_path/3]).
+:- autoload(library(lists), [append/3, member/2]).
+:- autoload(library(option), [option/2, option/3]).
+:- autoload(library(prolog_code), [most_general_goal/2]).
+:- use_module(library(debug), [debug/3]).
+
+:- autoload(library(ros/qos), [ros_qos_object/2]).
 
 :- meta_predicate
     ros_subscribe(+, 1, +).
@@ -145,7 +148,9 @@ node(Node, Options) :-
 node(Node, _) :-
     ros_default_node(Node).
 
-qos_profile(_QoSProfile, _Options).
+qos_profile(QoSProfile, Options) :-
+    option(qos(NameOrDict), Options, default),
+    ros_qos_object(NameOrDict, QoSProfile).
 
 %!  ros_unsubscribe(+Topic) is semidet.
 %
