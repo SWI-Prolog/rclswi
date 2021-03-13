@@ -162,24 +162,24 @@ type introspection.  Missing:
     - [ ] print_message/2 forwarding should only be to /rosout
     - [ ] Defaults should depend on whether a session is interactive
   - [ ] Deal with services
-        - [x] Low level interface: read/write request/response, wait for
-	      client and service.
-	- [ ] High level interface.
-	  - [ ] Client
-	    - [x] Synchronous calls
-	    - [ ] ASynchronous calls
-	  - [ ] Service
-	    - [ ] Read/compute/reply loop
-	    - [ ] Read/compute/reply loop using multiple threads
-	    - [ ] Callback based
+    - [x] Low level interface: read/write request/response, wait for
+	  client and service.
+    - [ ] High level interface.
+      - [ ] Client
+	- [x] Synchronous calls
+	- [ ] ASynchronous calls
+      - [ ] Service
+	- [ ] Read/compute/reply loop
+	- [ ] Read/compute/reply loop using multiple threads
+	- [ ] Callback based
   - [ ] Deal with actions
-        - [x] Action time introspection
-	- [x] Low level interface for creating an action client or server
+    - [x] Action time introspection
+    - [x] Low level interface for creating an action client or server
   - [ ] Deal with clocks
-        - [x] Basics for creating a clock and asking its time
+    - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
   - [ ] Advanced configuration
-    - [ ] Provide access to the QoS policies
+    - [x] Provide access to the QoS policies
   - [ ] Threads (Executors)
     - [ ] Thread-per-node model?
   - [ ] ROS2 Lifecycle support?
@@ -195,8 +195,8 @@ type introspection.  Missing:
       - [ ] Pass command line options into `rcl_init()` and `rcl_node_init()`
       - [ ] Provide a skeleton project
   - [ ] Process cleanup
-        - [ ] Properly handle signals asynchronously (Control-C)
-	- [ ] Finish and reclaim resources in the right order.
+    - [ ] Properly handle signals asynchronously (Control-C)
+    - [ ] Finish and reclaim resources in the right order.
   - [ ] Documentation
   - [ ] Testing
   - [ ] Performance evaluation
