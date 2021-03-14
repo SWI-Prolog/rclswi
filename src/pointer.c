@@ -101,7 +101,8 @@ get_pointer(term_t t, void **ptr, const c_pointer_type *type)
 }
 
 int
-get_pointer_and_symbol(term_t t, void **ptr, atom_t *symbol, const c_pointer_type *type)
+get_pointer_and_symbol(term_t t, void **ptr, atom_t *symbol,
+		       const c_pointer_type *type)
 { c_ptr *ref;
   PL_blob_t *btype;
   atom_t a;

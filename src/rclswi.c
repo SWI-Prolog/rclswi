@@ -170,6 +170,11 @@ static const c_pointer_type rwm_service_info_type =
   free_rwm_service_info
 };
 
+static const c_pointer_type rmw_request_id_type =
+{ "rmw_request_id_t",
+  free
+};
+
 static const c_pointer_type rclswi_srv_type_type =
 { "rclswi_service_type_t",
   NULL
@@ -827,27 +832,49 @@ ros_create_client(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
 }
 
 
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  int64_t			 seq_number;
+  term_t			 Message;
+  term_t			 SeqNumber;
+} send_request_context_t;
+
+static int
+prepare_send_request(send_request_context_t *ctx)
+{ if ( (ctx->msg = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+
+    return fill_message(ctx->Message, ctx->msg, ctx->msg_type->introspection,
+			FALSE);
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+finish_send_request(send_request_context_t *ctx, int rc)
+{ (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  return rc && PL_unify_int64(ctx->SeqNumber, ctx->seq_number);
+}
+
 static foreign_t
 ros_send_request(term_t Client, term_t Message, term_t SeqNumber)
 { rclswi_client_t *client;
-  int64_t seq_number;
-  void *msg = NULL;
-  int rc = TRUE;
+  int rc;
 
   if ( !get_pointer(Client, (void**)&client, &client_type) )
     return FALSE;
 
-  const rclswi_message_type_t *msg_type = &client->type_support->request;
-  msg = (*msg_type->create)();
-  (*msg_type->init)(msg);
+  send_request_context_t ctx = { .msg_type  = &client->type_support->request,
+                                 .Message   = Message,
+				 .SeqNumber = SeqNumber
+			       };
 
-  if ( (rc=fill_message(Message, msg, msg_type->introspection, FALSE)) )
-    TRY(rcl_send_request(&client->client, msg, &seq_number));
-
-  (*msg_type->fini)(msg);
-  (*msg_type->destroy)(msg);
-
-  return rc && PL_unify_int64(SeqNumber, seq_number);
+  rc = prepare_send_request(&ctx);
+  TRY(rcl_send_request(&client->client, ctx.msg, &ctx.seq_number));
+  return finish_send_request(&ctx, rc);
 }
 
 
@@ -895,25 +922,33 @@ put_time_stamp(term_t t, int64_t stamp)
   return PL_put_float(t, d);
 }
 
-
 static int
-put_rmw_service_info(term_t t, const rmw_service_info_t *header)
+put_rwm_request_id(term_t t, const rmw_request_id_t *request_id)
 { const atom_t reqid_keys[] = { ATOM_writer_guid, ATOM_sequence_number };
-  const atom_t hdr_keys[] = { ATOM_source_timestamp, ATOM_received_timestamp,
-			      ATOM_request_id };
   term_t reqid_values = PL_new_term_refs(2);
-  term_t hdr_values = PL_new_term_refs(3);
 
   return
   ( (reqid_values = PL_new_term_refs(2)) &&
-    (hdr_values = PL_new_term_refs(3)) &&
-    put_guid(reqid_values+0, (const uint8_t*)header->request_id.writer_guid) &&
-    PL_put_int64(reqid_values+1, header->request_id.sequence_number) &&
+    put_guid(reqid_values+0, (const uint8_t*)request_id->writer_guid) &&
+    PL_put_int64(reqid_values+1, request_id->sequence_number) &&
+    PL_put_dict(t, ATOM_request_id, 2, reqid_keys, reqid_values) &&
+    (PL_reset_term_refs(reqid_values),TRUE)
+  );
+}
+
+static int
+put_rmw_service_info(term_t t, const rmw_service_info_t *header)
+{ const atom_t hdr_keys[] = { ATOM_source_timestamp, ATOM_received_timestamp,
+			      ATOM_request_id };
+  term_t hdr_values = PL_new_term_refs(3);
+
+  return
+  ( (hdr_values = PL_new_term_refs(3)) &&
     put_time_stamp(hdr_values+0, header->source_timestamp) &&
     put_time_stamp(hdr_values+1, header->received_timestamp) &&
-    PL_put_dict(hdr_values+2, ATOM_request_id, 2, reqid_keys, reqid_values) &&
+    put_rwm_request_id(hdr_values+2, &header->request_id) &&
     PL_put_dict(t, ATOM_service_info, 3, hdr_keys, hdr_values) &&
-    (PL_reset_term_refs(reqid_values),TRUE)
+    (PL_reset_term_refs(hdr_values),TRUE)
   );
 }
 
@@ -1075,35 +1110,58 @@ ros_send_response(term_t Service, term_t Message, term_t Header)
   return rc;
 }
 
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  rmw_service_info_t		*header;
+  term_t			 result;
+  term_t			 Message;
+  term_t			 MessageInfo;
+} take_request_context_t;
+
+static int
+prepare_take_request(take_request_context_t *ctx)
+{ if ( (ctx->result = PL_new_term_ref()) &&
+       (ctx->header = malloc(sizeof(*ctx->header))) &&
+       (ctx->msg    = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+    return TRUE;
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+finish_take_request(take_request_context_t *ctx, int rc)
+{ rc = rc && put_message(ctx->result, ctx->msg, ctx->msg_type->introspection)
+	  && PL_unify(ctx->Message, ctx->result)
+          && unify_pointer(ctx->MessageInfo, ctx->header, &rwm_service_info_type);
+
+  (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  if ( !rc && ctx->header )
+    free(ctx->header);
+
+  return rc;
+}
+
+
 static foreign_t
 ros_take_request(term_t Service, term_t Message, term_t MessageInfo)
 { rclswi_service_t *service;
-  rmw_service_info_t *header = NULL;
-  void *msg = NULL;
-  int rc = TRUE;
-  term_t result = PL_new_term_ref();
+  int rc;
 
   if ( !get_pointer(Service, (void**)&service, &service_type) )
     return FALSE;
-  if ( !(header = malloc(sizeof(*header))) )
-    return PL_resource_error("memory");
 
-  const rclswi_message_type_t *msg_type = &service->type_support->request;
-  msg = (*msg_type->create)();
-  (*msg_type->init)(msg);
+  take_request_context_t ctx = { .msg_type = &service->type_support->request,
+				 .Message = Message,
+				 .MessageInfo = MessageInfo
+			       };
 
-  TRY(rcl_take_request_with_info(&service->service, header, msg));
-  rc = rc && put_message(result, msg, msg_type->introspection)
-	  && PL_unify(Message, result)
-          && unify_pointer(MessageInfo, header, &rwm_service_info_type);
-
-  (*msg_type->fini)(msg);
-  (*msg_type->destroy)(msg);
-
-  if ( !rc && header )
-    free(header);
-
-  return rc;
+  rc = prepare_take_request(&ctx);
+  TRY(rcl_take_request_with_info(&service->service, ctx.header, ctx.msg));
+  return finish_take_request(&ctx, rc);
 }
 
 
@@ -1203,6 +1261,34 @@ ros_clock_time(term_t Clock, term_t Time)
 		 /*******************************
 		 *	 ACTIONS (CLIENT)	*
 		 *******************************/
+
+/* Service type for action_msgs/srv/CancelGoal */
+static rclswi_srv_type_t *cancel_type_ptr = NULL;
+
+static foreign_t
+set_action_cancel_type(term_t SrvType)
+{ atom_t symbol;
+
+  if ( !get_pointer_and_symbol(SrvType, (void**)&cancel_type_ptr, &symbol,
+			       &rclswi_srv_type_type) )
+    return FALSE;
+
+  PL_register_atom(symbol);
+  return TRUE;
+}
+
+static rclswi_srv_type_t *
+goal_cancel_type_support(void)
+{ if ( !cancel_type_ptr )
+  { predicate_t pred = PL_predicate("init_cancel_type", 0, "ros_action");
+
+    if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
+      return NULL;
+  }
+
+  return cancel_type_ptr;
+}
+
 
 typedef struct
 { rcl_action_client_t   action_client;			/* Must be first */
@@ -1378,11 +1464,11 @@ ros_create_action_server(term_t Node, term_t Clock, term_t ActType, term_t Name,
 
 
 static foreign_t
-ros_action_server_prop(term_t ActionClient, term_t Key, term_t Value)
+ros_action_server_prop(term_t ActionServer, term_t Key, term_t Value)
 { rclswi_action_server_t *action_server;
   atom_t key;
 
-  if ( get_pointer(ActionClient, (void**)&action_server, &action_server_type) &&
+  if ( get_pointer(ActionServer, (void**)&action_server, &action_server_type) &&
        PL_get_atom_ex(Key, &key) )
   { if ( key == ATOM_node )
       return PL_unify_atom(Value, action_server->node_symbol);
@@ -1394,6 +1480,544 @@ ros_action_server_prop(term_t ActionClient, term_t Key, term_t Value)
 
   return FALSE;
 }
+
+
+/* Sending action requests */
+
+static foreign_t
+ros_action_send_goal_request(term_t ActionClient, term_t Message, term_t SeqNum)
+{ rclswi_action_client_t *action_client;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+
+  send_request_context_t ctx = { .msg_type  = &action_client->type_support->goal,
+                                 .Message   = Message,
+				 .SeqNumber = SeqNum
+			       };
+
+  rc = prepare_send_request(&ctx);
+  TRY(rcl_action_send_goal_request(&action_client->action_client,
+				   ctx.msg, &ctx.seq_number));
+  return finish_send_request(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_send_result_request(term_t ActionClient, term_t Message, term_t SeqNum)
+{ rclswi_action_client_t *action_client;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+
+  send_request_context_t ctx = { .msg_type  = &action_client->type_support->result,
+                                 .Message   = Message,
+				 .SeqNumber = SeqNum
+			       };
+
+  rc = prepare_send_request(&ctx);
+  TRY(rcl_action_send_result_request(&action_client->action_client,
+				     ctx.msg, &ctx.seq_number));
+  return finish_send_request(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_send_cancel_request(term_t ActionClient, term_t Message, term_t SeqNum)
+{ rclswi_action_client_t *action_client;
+  int rc;
+  rclswi_srv_type_t *cancel_type;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+  if ( !(cancel_type=goal_cancel_type_support()) )
+    return FALSE;
+
+  send_request_context_t ctx = { .msg_type  = &cancel_type->request,
+                                 .Message   = Message,
+				 .SeqNumber = SeqNum
+			       };
+
+  rc = prepare_send_request(&ctx);
+  TRY(rcl_action_send_result_request(&action_client->action_client,
+				     &ctx.msg, &ctx.seq_number));
+  return finish_send_request(&ctx, rc);
+}
+
+
+/* Taking action requests */
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+This is very similar to ros_take_request()  for services, but the action
+variation thereof has a header if   type  `rmw_request_id_t` rather than
+`rmw_service_info_t`.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  rmw_request_id_t		*header;
+  term_t			 result;
+  term_t			 Message;
+  term_t			 MessageInfo;
+} action_take_request_context_t;
+
+static int
+action_prepare_take_request(action_take_request_context_t *ctx)
+{ if ( (ctx->result = PL_new_term_ref()) &&
+       (ctx->header = malloc(sizeof(*ctx->header))) &&
+       (ctx->msg    = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+    return TRUE;
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+action_finish_take_request(action_take_request_context_t *ctx, int rc)
+{ rc = rc && put_message(ctx->result, ctx->msg, ctx->msg_type->introspection)
+	  && PL_unify(ctx->Message, ctx->result)
+          && unify_pointer(ctx->MessageInfo, ctx->header, &rmw_request_id_type);
+
+  (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  if ( !rc && ctx->header )
+    free(ctx->header);
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_take_goal_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  action_take_request_context_t ctx =
+  { .msg_type    = &action_server->type_support->goal,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_request(&ctx);
+  TRY(rcl_action_take_goal_request(&action_server->action_server,
+				   ctx.header, ctx.msg));
+  return action_finish_take_request(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_take_result_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  action_take_request_context_t ctx =
+  { .msg_type    = &action_server->type_support->result,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_request(&ctx);
+  TRY(rcl_action_take_goal_request(&action_server->action_server,
+				   ctx.header, ctx.msg));
+  return action_finish_take_request(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_take_cancel_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  rclswi_srv_type_t *cancel_type;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+  if ( !(cancel_type=goal_cancel_type_support()) )
+    return FALSE;
+
+  action_take_request_context_t ctx =
+  { .msg_type    = &cancel_type->request,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_request(&ctx);
+  TRY(rcl_action_take_goal_request(&action_server->action_server,
+				   ctx.header, ctx.msg));
+  return action_finish_take_request(&ctx, rc);
+}
+
+
+/* Sending action responses */
+
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  rmw_request_id_t		*header;
+  term_t			 Message;
+  term_t			 MessageInfo;
+} action_send_response_context_t;
+
+
+static int
+action_prepare_send_response(action_send_response_context_t *ctx)
+{ if ( !get_pointer(ctx->MessageInfo, (void**)&ctx->header,  &rmw_request_id_type) )
+    return FALSE;
+
+  if ( (ctx->msg = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+
+    return fill_message(ctx->Message, ctx->msg, ctx->msg_type->introspection,
+			FALSE);
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+action_finish_send_response(action_send_response_context_t *ctx, int rc)
+{ (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_send_goal_response(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  action_send_response_context_t ctx =
+  { .msg_type    = &action_server->type_support->goal,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_send_response(&ctx);
+  TRY(rcl_action_send_goal_response(&action_server->action_server,
+				    ctx.header, ctx.msg));
+  return action_finish_send_response(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_send_result_response(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  action_send_response_context_t ctx =
+  { .msg_type    = &action_server->type_support->result,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_send_response(&ctx);
+  TRY(rcl_action_send_result_response(&action_server->action_server,
+				      ctx.header, ctx.msg));
+  return action_finish_send_response(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_send_cancel_response(term_t ActionServer, term_t Msg, term_t MsgInfo)
+{ rclswi_action_server_t *action_server;
+  rclswi_srv_type_t *cancel_type;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+  if ( !(cancel_type=goal_cancel_type_support()) )
+    return FALSE;
+
+  action_send_response_context_t ctx =
+  { .msg_type    = &cancel_type->response,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_send_response(&ctx);
+  TRY(rcl_action_send_cancel_response(&action_server->action_server,
+				      ctx.header, ctx.msg));
+  return action_finish_send_response(&ctx, rc);
+}
+
+
+/* Taking action responses */
+
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  rmw_request_id_t		 header;
+  term_t			 result;
+  term_t			 Message;
+  term_t			 MessageInfo;
+} action_take_response_context_t;
+
+
+static int
+action_prepare_take_response(action_take_response_context_t *ctx)
+{ if ( (ctx->result = PL_new_term_ref()) &&
+       (ctx->msg    = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+    return TRUE;
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+action_finish_take_response(action_take_response_context_t *ctx, int rc)
+{ rc = rc && put_message(ctx->result, ctx->msg, ctx->msg_type->introspection)
+	  && PL_unify(ctx->Message, ctx->result)
+          && put_rwm_request_id(ctx->result, &ctx->header)
+	  && PL_unify(ctx->MessageInfo, ctx->result);
+
+  (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_take_goal_response(term_t ActionClient, term_t Msg, term_t MsgInfo)
+{ rclswi_action_client_t *action_client;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+
+  action_take_response_context_t ctx =
+  { .msg_type    = &action_client->type_support->goal,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_response(&ctx);
+  TRY(rcl_action_take_goal_response(&action_client->action_client,
+				    &ctx.header, ctx.msg));
+  return action_finish_take_response(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_take_result_response(term_t ActionClient, term_t Msg, term_t MsgInfo)
+{ rclswi_action_client_t *action_client;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+
+  action_take_response_context_t ctx =
+  { .msg_type    = &action_client->type_support->result,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_response(&ctx);
+  TRY(rcl_action_take_result_response(&action_client->action_client,
+				      &ctx.header, ctx.msg));
+  return action_finish_take_response(&ctx, rc);
+}
+
+
+static foreign_t
+ros_action_take_cancel_response(term_t ActionClient, term_t Msg, term_t MsgInfo)
+{ rclswi_action_client_t *action_client;
+  rclswi_srv_type_t *cancel_type;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+  if ( !(cancel_type=goal_cancel_type_support()) )
+    return FALSE;
+
+  action_take_response_context_t ctx =
+  { .msg_type    = &cancel_type->response,
+    .Message     = Msg,
+    .MessageInfo = MsgInfo
+  };
+
+  rc = action_prepare_take_response(&ctx);
+  TRY(rcl_action_take_cancel_response(&action_client->action_client,
+				      &ctx.header, ctx.msg));
+  return action_finish_take_response(&ctx, rc);
+}
+
+/* Action feedback */
+
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  term_t			 Message;
+} action_send_message_context_t;
+
+static int
+action_prepare_send_message(action_send_message_context_t *ctx)
+{ if ( (ctx->msg = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+    return fill_message(ctx->Message, ctx->msg, ctx->msg_type->introspection,
+			FALSE);
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+action_finish_send_message(action_send_message_context_t *ctx, int rc)
+{ (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  return rc;
+}
+
+static foreign_t
+ros_action_publish_feedback(term_t ActionServer, term_t Message)
+{ rclswi_action_server_t *action_server;
+  int rc;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  action_send_message_context_t ctx =
+  { .msg_type    = &action_server->type_support->feedback,
+    .Message     = Message,
+  };
+
+  rc = action_prepare_send_message(&ctx);
+  TRY(rcl_action_publish_feedback(&action_server->action_server, ctx.msg));
+  return action_finish_send_message(&ctx, rc);
+}
+
+
+typedef struct
+{ const rclswi_message_type_t	*msg_type;
+  void			        *msg;
+  term_t			 result;
+  term_t			 Message;
+} action_take_message_context_t;
+
+static int
+action_prepare_take_message(action_take_message_context_t *ctx)
+{ if ( !(ctx->result = PL_new_term_ref()) )
+    return FALSE;
+
+  if ( (ctx->msg = (*ctx->msg_type->create)()) )
+  { (*ctx->msg_type->init)(ctx->msg);
+    return TRUE;
+  } else
+    return PL_resource_error("memory");
+}
+
+static int
+action_finish_take_message(action_take_message_context_t *ctx, int rc)
+{ rc = rc && put_message(ctx->result, ctx->msg, ctx->msg_type->introspection)
+	  && PL_unify(ctx->Message, ctx->result);
+
+  (*ctx->msg_type->fini)(ctx->msg);
+  (*ctx->msg_type->destroy)(ctx->msg);
+
+  return rc;
+}
+
+static foreign_t
+ros_action_take_feedback(term_t ActionClient, term_t Message)
+{ rclswi_action_client_t *action_client;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+
+  action_take_message_context_t ctx =
+  { .msg_type    = &action_client->type_support->feedback,
+    .Message     = Message,
+  };
+
+  rc = action_prepare_take_message(&ctx);
+  TRY(rcl_action_take_feedback(&action_client->action_client, ctx.msg));
+  return action_finish_take_message(&ctx, rc);
+}
+
+/* Publish/take action goal status */
+
+/* Message type for action_msgs/msg/GoalStatusArray */
+static rclswi_message_type_t *status_type_ptr = NULL;
+
+static foreign_t
+set_goal_status_type(term_t MsgType)
+{ atom_t symbol;
+
+  if ( !get_pointer_and_symbol(MsgType, (void**)&status_type_ptr, &symbol,
+			       &rclswi_message_type_type) )
+    return FALSE;
+
+  PL_register_atom(symbol);
+  return TRUE;
+}
+
+static rclswi_message_type_t *
+goal_status_type(void)
+{ if ( !status_type_ptr )
+  { predicate_t pred = PL_predicate("init_goal_status", 0, "ros_action");
+
+    if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
+      return NULL;
+  }
+
+  return status_type_ptr;
+}
+
+static foreign_t
+ros_action_publish_status(term_t ActionServer)
+{ rclswi_action_server_t *action_server;
+  rcl_action_goal_status_array_t status_message =
+    rcl_action_get_zero_initialized_goal_status_array();
+  int rc = TRUE;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  TRY(rcl_action_get_goal_status_array(&action_server->action_server, &status_message));
+  TRY(rcl_action_publish_status(&action_server->action_server, &status_message));
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_take_status(term_t ActionClient, term_t Message)
+{ rclswi_action_client_t *action_client;
+  rclswi_message_type_t *status_type;
+  int rc;
+
+  if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
+    return FALSE;
+  if ( !(status_type=goal_status_type()) )
+    return FALSE;
+
+  action_take_message_context_t ctx =
+  { .msg_type    = status_type,
+    .Message     = Message,
+  };
+
+  rc = action_prepare_take_message(&ctx);
+  TRY(rcl_action_take_status(&action_client->action_client, ctx.msg));
+  return action_finish_take_message(&ctx, rc);
+}
+
 
 
 
@@ -2770,6 +3394,25 @@ install_librclswi(void)
   PRED("$ros_publish",		     2,	ros_publish,		    0);
   PRED("ros_send_request",	     3,	ros_send_request,	    0);
   PRED("ros_send_response",	     3,	ros_send_response,	    0);
+  PRED("ros_action_send_goal_request", 3, ros_action_send_goal_request, 0);
+  PRED("ros_action_send_result_request", 3, ros_action_send_result_request, 0);
+  PRED("ros_action_send_cancel_request", 3, ros_action_send_cancel_request, 0);
+  PRED("ros_action_take_goal_request", 3, ros_action_take_goal_request, 0);
+  PRED("ros_action_take_result_request", 3, ros_action_take_result_request, 0);
+  PRED("ros_action_take_cancel_request", 3, ros_action_take_cancel_request, 0);
+  PRED("ros_action_send_goal_response", 3, ros_action_send_goal_response, 0);
+  PRED("ros_action_send_result_response", 3, ros_action_send_result_response, 0);
+  PRED("ros_action_send_cancel_response", 3, ros_action_send_cancel_response, 0);
+  PRED("ros_action_take_goal_response", 3, ros_action_take_goal_response, 0);
+  PRED("ros_action_take_result_response", 3, ros_action_take_result_response, 0);
+  PRED("ros_action_take_cancel_response", 3, ros_action_take_cancel_response, 0);
+  PRED("ros_action_publish_feedback", 2, ros_action_publish_feedback, 0);
+  PRED("ros_action_take_feedback", 2, ros_action_take_feedback, 0);
+  PRED("ros_action_publish_status", 1, ros_action_publish_status, 0);
+  PRED("ros_action_take_status", 2, ros_action_take_status, 0);
+
+  PRED("set_action_cancel_type",     1, set_action_cancel_type,     0);
+  PRED("set_goal_status_type",     1, set_goal_status_type,     0);
 
   PRED("ros_rwm_implementation",     1,	ros_rwm_implementation,	    0);
 
