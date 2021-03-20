@@ -83,7 +83,11 @@ static atom_t ATOM_writer_guid;
 static atom_t ATOM_sequence_number;
 static atom_t ATOM_node;
 static atom_t ATOM_goal;
+static atom_t ATOM_goal_request;
+static atom_t ATOM_goal_response;
 static atom_t ATOM_result;
+static atom_t ATOM_result_request;
+static atom_t ATOM_result_response;
 static atom_t ATOM_feedback;
 static atom_t ATOM_action;
 static atom_t ATOM_ros;
@@ -98,6 +102,7 @@ static functor_t FUNCTOR_ros_error2;
 static functor_t FUNCTOR_minus2;
 static functor_t FUNCTOR_list1;
 static functor_t FUNCTOR_list2;
+static functor_t FUNCTOR_action_client6;
 
 
 		 /*******************************
@@ -1280,7 +1285,7 @@ set_action_cancel_type(term_t SrvType)
 static rclswi_srv_type_t *
 goal_cancel_type_support(void)
 { if ( !cancel_type_ptr )
-  { predicate_t pred = PL_predicate("init_cancel_type", 0, "ros_action");
+  { predicate_t pred = PL_predicate("init_cancel_type", 0, "ros_actions");
 
     if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
       return NULL;
@@ -1492,7 +1497,7 @@ ros_action_send_goal_request(term_t ActionClient, term_t Message, term_t SeqNum)
   if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
     return FALSE;
 
-  send_request_context_t ctx = { .msg_type  = &action_client->type_support->goal,
+  send_request_context_t ctx = { .msg_type  = &action_client->type_support->goal.request,
                                  .Message   = Message,
 				 .SeqNumber = SeqNum
 			       };
@@ -1512,7 +1517,7 @@ ros_action_send_result_request(term_t ActionClient, term_t Message, term_t SeqNu
   if ( !get_pointer(ActionClient, (void**)&action_client, &action_client_type) )
     return FALSE;
 
-  send_request_context_t ctx = { .msg_type  = &action_client->type_support->result,
+  send_request_context_t ctx = { .msg_type  = &action_client->type_support->result.request,
                                  .Message   = Message,
 				 .SeqNumber = SeqNum
 			       };
@@ -1600,7 +1605,7 @@ ros_action_take_goal_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_take_request_context_t ctx =
-  { .msg_type    = &action_server->type_support->goal,
+  { .msg_type    = &action_server->type_support->goal.request,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1621,7 +1626,7 @@ ros_action_take_result_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_take_request_context_t ctx =
-  { .msg_type    = &action_server->type_support->result,
+  { .msg_type    = &action_server->type_support->result.request,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1700,7 +1705,7 @@ ros_action_send_goal_response(term_t ActionServer, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_send_response_context_t ctx =
-  { .msg_type    = &action_server->type_support->goal,
+  { .msg_type    = &action_server->type_support->goal.response,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1721,7 +1726,7 @@ ros_action_send_result_response(term_t ActionServer, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_send_response_context_t ctx =
-  { .msg_type    = &action_server->type_support->result,
+  { .msg_type    = &action_server->type_support->result.response,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1802,7 +1807,7 @@ ros_action_take_goal_response(term_t ActionClient, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_take_response_context_t ctx =
-  { .msg_type    = &action_client->type_support->goal,
+  { .msg_type    = &action_client->type_support->goal.response,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1823,7 +1828,7 @@ ros_action_take_result_response(term_t ActionClient, term_t Msg, term_t MsgInfo)
     return FALSE;
 
   action_take_response_context_t ctx =
-  { .msg_type    = &action_client->type_support->result,
+  { .msg_type    = &action_client->type_support->result.response,
     .Message     = Msg,
     .MessageInfo = MsgInfo
   };
@@ -1971,7 +1976,7 @@ set_goal_status_type(term_t MsgType)
 static rclswi_message_type_t *
 goal_status_type(void)
 { if ( !status_type_ptr )
-  { predicate_t pred = PL_predicate("init_goal_status", 0, "ros_action");
+  { predicate_t pred = PL_predicate("init_goal_status", 0, "ros_actions");
 
     if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
       return NULL;
@@ -2019,6 +2024,18 @@ ros_action_take_status(term_t ActionClient, term_t Message)
 }
 
 
+static foreign_t
+ros_action_notify_goal_done(term_t ActionServer)
+{ rclswi_action_server_t *action_server;
+  int rc = TRUE;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  TRY(rcl_action_notify_goal_done(&action_server->action_server));
+
+  return rc;
+}
 
 
 		 /*******************************
@@ -2208,41 +2225,57 @@ ros_service_type(term_t IntrospectionRequest,
 
 
 static foreign_t
-ros_action_type(term_t IntrospectionGoal,
-		term_t IntrospectionResult,
-		term_t IntrospectionFeedback,
-		term_t TypeSupport,
-		term_t PrefixGoal,
-		term_t PrefixResult,
-		term_t PrefixFeedback,
-		term_t Functions)
-{ char *prefix_goal;
-  char *prefix_res;
+ros_action_type(term_t a0)
+{ char *prefix_goal_req;
+  char *prefix_goal_res;
+  char *prefix_res_req;
+  char *prefix_res_res;
   char *prefix_fb;
-  char *introsp_goal;
-  char *introsp_res;
+  char *introsp_goal_req;
+  char *introsp_goal_res;
+  char *introsp_res_req;
+  char *introsp_res_res;
   char *introsp_fb;
   char *type_support;
 
-  if ( get_utf8_name_ex(PrefixGoal, &prefix_goal) &&
-       get_utf8_name_ex(PrefixResult, &prefix_res) &&
-       get_utf8_name_ex(PrefixFeedback, &prefix_fb) &&
-       get_utf8_name_ex(IntrospectionGoal, &introsp_goal) &&
-       get_utf8_name_ex(IntrospectionResult, &introsp_res) &&
-       get_utf8_name_ex(IntrospectionFeedback, &introsp_fb) &&
-       get_utf8_name_ex(TypeSupport, &type_support) )
+  term_t ISFuncGoalRequest	   = a0+0;
+  term_t ISFuncGoalResponse	   = a0+1;
+  term_t ISFuncResultRequest	   = a0+2;
+  term_t ISFuncResultResponse	   = a0+3;
+  term_t ISFuncFeedback		   = a0+4;
+  term_t TSFunc			   = a0+5;
+  term_t FuncPostfixGoalRequest	   = a0+6;
+  term_t FuncPostfixGoalResponse   = a0+7;
+  term_t FuncPostfixResultRequest  = a0+8;
+  term_t FuncPostfixResultResponse = a0+9;
+  term_t FuncPostfixFeedback	   = a0+10;
+  term_t ActFunctions		   = a0+11;
+
+  if ( get_utf8_name_ex(FuncPostfixGoalRequest,	   &prefix_goal_req) &&
+       get_utf8_name_ex(FuncPostfixGoalResponse,   &prefix_goal_res) &&
+       get_utf8_name_ex(FuncPostfixResultRequest,  &prefix_res_req) &&
+       get_utf8_name_ex(FuncPostfixResultResponse, &prefix_res_res) &&
+       get_utf8_name_ex(FuncPostfixFeedback,	   &prefix_fb) &&
+       get_utf8_name_ex(ISFuncGoalRequest,	   &introsp_goal_req) &&
+       get_utf8_name_ex(ISFuncGoalResponse,	   &introsp_goal_res) &&
+       get_utf8_name_ex(ISFuncResultRequest,	   &introsp_res_req) &&
+       get_utf8_name_ex(ISFuncResultResponse,	   &introsp_res_res) &&
+       get_utf8_name_ex(ISFuncFeedback,	           &introsp_fb) &&
+       get_utf8_name_ex(TSFunc,			   &type_support) )
   { rclswi_action_type_t *ret;
 
     if ( (ret = malloc(sizeof(*ret))) )
     { if ( !(ret->type_support = introspection_func(type_support)) ||
-	   !msg_type_functions(&ret->goal,     prefix_goal, introsp_goal, NULL) ||
-	   !msg_type_functions(&ret->result,   prefix_res,  introsp_res,  NULL) ||
-	   !msg_type_functions(&ret->feedback, prefix_fb,   introsp_fb,   NULL) )
+	   !msg_type_functions(&ret->goal.request,    prefix_goal_req, introsp_goal_req, NULL) ||
+	   !msg_type_functions(&ret->goal.response,   prefix_goal_res, introsp_goal_res, NULL) ||
+	   !msg_type_functions(&ret->result.request,  prefix_res_req,  introsp_res_req,  NULL) ||
+	   !msg_type_functions(&ret->result.response, prefix_res_res,  introsp_res_res,  NULL) ||
+	   !msg_type_functions(&ret->feedback,        prefix_fb,       introsp_fb,       NULL) )
       { free(ret);
 	return FALSE;
       }
 
-      return unify_pointer(Functions, ret, &rclswi_action_type_type);
+      return unify_pointer(ActFunctions, ret, &rclswi_action_type_type);
     }
   }
 
@@ -2474,13 +2507,18 @@ ros_type_introspection(term_t TypeBlob, term_t Type)
 	     PL_put_dict(tmp, ATOM_service, 2, keys, values) );
     } else if ( type == &rclswi_action_type_type )
     { rclswi_action_type_t *action_type = ptr;
-      atom_t keys[] = {ATOM_goal, ATOM_result, ATOM_feedback};
-      term_t values = PL_new_term_refs(3);
+      atom_t keys[] = { ATOM_goal_request, ATOM_goal_response,
+		        ATOM_result_request, ATOM_result_response,
+			ATOM_feedback
+		      };
+      term_t values = PL_new_term_refs(5);
 
-      rc = ( put_type(values+0, action_type->goal.introspection) &&
-	     put_type(values+1, action_type->result.introspection) &&
-	     put_type(values+2, action_type->feedback.introspection) &&
-	     PL_put_dict(tmp, ATOM_action, 3, keys, values) );
+      rc = ( put_type(values+0, action_type->goal.request.introspection) &&
+	     put_type(values+1, action_type->goal.response.introspection) &&
+	     put_type(values+2, action_type->result.request.introspection) &&
+	     put_type(values+3, action_type->result.response.introspection) &&
+	     put_type(values+4, action_type->feedback.introspection) &&
+	     PL_put_dict(tmp, ATOM_action, 5, keys, values) );
     } else
     { return PL_type_error("ros_type", TypeBlob);
     }
@@ -2661,6 +2699,26 @@ put_fixed_array(term_t Message, void *msg,
 { return put_array(Message, msg, member->array_size_, member);
 }
 
+static int
+is_uuid_message(const rosidl_typesupport_introspection_c__MessageMembers *members)
+{ if ( members->member_count_ == 1 )
+  { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
+    return ( mem->is_array_ &&
+	     mem->array_size_ == 16 &&
+	     mem->type_id_ == rosidl_typesupport_introspection_c__ROS_TYPE_UINT8 &&
+	     strcmp(mem->name_, "uuid") == 0 );
+  }
+
+  return FALSE;
+}
+
+static int
+put_uuid_message(term_t Message, void *msg,
+		 const rosidl_typesupport_introspection_c__MessageMembers *members)
+{ const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
+
+  return put_guid(Message, (uint8_t*)msg+mem->offset_);
+}
 
 #define FAST_KEYS 32
 
@@ -2669,10 +2727,8 @@ put_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts)
 { const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
   int rc = TRUE;
 
-  if ( members->member_count_ == 1 && 0 )
-  { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
-    (void)mem;
-    Sdprintf("TBD: non-struct support\n");
+  if ( is_uuid_message(members) )
+  { return put_uuid_message(Message, msg, members);
   } else
   { atom_t keybuf[FAST_KEYS];
     atom_t tag    = lwr_atom(members->message_name_);
@@ -2718,6 +2774,57 @@ put_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts)
 		 /*******************************
 		 *	  PROLOG -> ROS		*
 		 *******************************/
+
+static int
+get_xdigit(int chr, int *val)
+{ if      ( chr >= '0' && chr <= '9' ) *val = chr-'0';
+  else if ( chr >= 'a' && chr <= 'f' ) *val = chr-'a'+10;
+  else if ( chr >= 'A' && chr <= 'F' ) *val = chr-'A'+10;
+  else return FALSE;
+
+  return TRUE;
+}
+
+static int
+get_hex(const char *in, uint8_t *val)
+{ int v1, v2;
+
+  if ( get_xdigit(in[0], &v1) &&
+       get_xdigit(in[1], &v2) )
+  { *val = (v1<<4)+v2;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+static int
+fill_uuid(term_t t, void *msg)
+{ size_t len;
+  char *s;
+
+  if ( PL_get_nchars(t, &len, &s, CVT_ATOM|CVT_STRING) && len == 36 &&
+       s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' )
+  { uint8_t *out = msg;
+
+    for(int i=0; i<16; i++)
+    { if ( !get_hex(s, out) )
+	return FALSE;
+      s += 2;
+      out++;
+      if ( i == 3 || i == 5 || i == 7 || i == 9 )
+      {	if ( *s == '-' )
+	  s++;
+      }
+    }
+
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+
 
 #include <rosidl_runtime_c/primitives_sequence_functions.h>
 
@@ -2941,8 +3048,19 @@ static int
 fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
 	     int noarray)
 { const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
-  term_t Value = PL_new_term_ref();
-  int rc = TRUE;
+  term_t Value;
+  int rc;
+
+  if ( is_uuid_message(members) )
+  { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
+    if ( (rc=fill_uuid(Message, (uint8_t*)msg+mem->offset_)) ||
+	 PL_exception(0) )
+      return rc;
+  }
+
+  if ( !(Value = PL_new_term_ref()) )
+    return FALSE;
+  rc = TRUE;
 
   for(uint32_t i=0; rc && i<members->member_count_; i++)
   { const rosidl_typesupport_introspection_c__MessageMember *mem
@@ -3012,57 +3130,71 @@ out:
 typedef struct wait_obj
 { c_pointer_type *ctype;
   union
-  { rclswi_subscription_t *swi_subscription;
-    rcl_guard_condition_t *guard_condition;
-    rcl_timer_t           *timer;
-    rclswi_client_t       *client;
-    rclswi_service_t	  *service;
-    rcl_event_t		  *events;
-    void                  *ptr;
+  { rclswi_subscription_t  *swi_subscription;
+    rcl_guard_condition_t  *guard_condition;
+    rcl_timer_t            *timer;
+    rclswi_client_t        *client;
+    rclswi_service_t	   *service;
+    rclswi_action_client_t *action_client;
+    rcl_event_t		   *events;
+    void                   *ptr;
   } obj;				/* The pointer */
+  size_t index;
   atom_t symbol;			/* Prolog blob handle */
 } wait_obj;
 
+
 static int
-add_to_ready(term_t tail, term_t head, size_t len,
-	     wait_obj *objs, const void *ptr)
-{ size_t i;
-
-  for(i=0; i<len; i++)
-  { if ( objs[i].obj.ptr == ptr )
-    { return ( PL_unify_list_ex(tail, head, tail) &&
-	       PL_unify_atom(head, objs[i].symbol) );
-    }
-  }
-
-  assert(0);
-  return FALSE;
+unify_action_client_ready(term_t head, atom_t blob,
+			  bool is_feedback_ready,
+			  bool is_status_ready,
+			  bool is_goal_response_ready,
+			  bool is_cancel_response_ready,
+			  bool is_result_response_ready)
+{ return PL_unify_term(head,
+		       PL_FUNCTOR, FUNCTOR_action_client6,
+		         PL_ATOM, blob,
+		         PL_BOOL, is_feedback_ready,
+		         PL_BOOL, is_status_ready,
+		         PL_BOOL, is_goal_response_ready,
+		         PL_BOOL, is_cancel_response_ready,
+		         PL_BOOL, is_result_response_ready);
 }
+
 
 static rcl_ret_t
 rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
 { int rc = TRUE;
   rcl_ret_t ret;
+  wait_obj *obj;
+  size_t i;
 
   TRY(rcl_wait_set_clear(wset));
-  for(size_t i=0; i<len && rc; i++)
-  { if ( objs[i].ctype == &subscription_type )
-    { rclswi_subscription_t *sub = objs[i].obj.swi_subscription;
+  for(i=0, obj=objs; i<len && rc; i++, obj++)
+  { if ( obj->ctype == &subscription_type )
+    { rclswi_subscription_t *sub = obj->obj.swi_subscription;
       if ( !sub->deleted )
       { sub->waiting = TRUE;
-	TRY(rcl_wait_set_add_subscription(wset, &sub->subscription, NULL));
+	TRY(rcl_wait_set_add_subscription(wset, &sub->subscription, &obj->index));
       }
-    } else if ( objs[i].ctype == &client_type )
-    { rclswi_client_t *client = objs[i].obj.client;
+    } else if ( obj->ctype == &client_type )
+    { rclswi_client_t *client = obj->obj.client;
       if ( !client->deleted )
       { client->waiting = TRUE;
-	TRY(rcl_wait_set_add_client(wset, &client->client, NULL));
+	TRY(rcl_wait_set_add_client(wset, &client->client, &obj->index));
       }
-    } else if ( objs[i].ctype == &service_type )
-    { rclswi_service_t *service = objs[i].obj.service;
+    } else if ( obj->ctype == &service_type )
+    { rclswi_service_t *service = obj->obj.service;
       if ( !service->deleted )
       { service->waiting = TRUE;
-	TRY(rcl_wait_set_add_service(wset, &service->service, NULL));
+	TRY(rcl_wait_set_add_service(wset, &service->service, &obj->index));
+      }
+    } else if ( obj->ctype == &action_client_type )
+    { rclswi_action_client_t *client = obj->obj.action_client;
+      if ( !client->deleted )
+      { client->waiting = TRUE;
+	TRY(rcl_action_wait_set_add_action_client(
+		wset, &client->action_client, NULL, NULL));
       }
     } else
       assert(0);
@@ -3073,22 +3205,27 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
   else
     assert(0);				/* TBD: pass Prolog exception */
 
-  for(size_t i=0; i<len && rc; i++)
-  { if ( objs[i].ctype == &subscription_type )
-    { rclswi_subscription_t *sub = objs[i].obj.swi_subscription;
+  for(i=0, obj=objs; i<len && rc; i++, obj++)
+  { if ( obj->ctype == &subscription_type )
+    { rclswi_subscription_t *sub = obj->obj.swi_subscription;
       sub->waiting = FALSE;
       if ( sub->deleted )
 	TRY_ANYWAY(rcl_subscription_fini(&sub->subscription, sub->node));
-    } else if ( objs[i].ctype == &client_type )
-    { rclswi_client_t *client = objs[i].obj.client;
+    } else if ( obj->ctype == &client_type )
+    { rclswi_client_t *client = obj->obj.client;
       client->waiting = FALSE;
       if ( client->deleted )
 	TRY_ANYWAY(rcl_client_fini(&client->client, client->node));
-    } else if ( objs[i].ctype == &service_type )
-    { rclswi_service_t *service = objs[i].obj.service;
+    } else if ( obj->ctype == &service_type )
+    { rclswi_service_t *service = obj->obj.service;
       service->waiting = FALSE;
       if ( service->deleted )
 	TRY_ANYWAY(rcl_service_fini(&service->service, service->node));
+    } else if ( obj->ctype == &action_client_type )
+    { rclswi_action_client_t *client = obj->obj.action_client;
+      client->waiting = FALSE;
+      if ( client->deleted )
+	TRY_ANYWAY(rcl_action_client_fini(&client->action_client, client->node));
     } else
       assert(0);
   }
@@ -3128,6 +3265,7 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   int rc = TRUE;
   size_t len;
   wait_obj *objs = NULL;
+  wait_obj *obj;
   int i;
   size_t nsubs=0, nguards=0, ntimers=0, nclients=0, nservices=0, nevents=0;
 
@@ -3149,7 +3287,9 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
       nclients++;
     else if ( objs[i].ctype == &service_type )
       nservices++;
-    else
+    else if ( objs[i].ctype == &action_client_type )
+    { nclients += 3; nsubs += 2;	/* needed? */
+    } else
       assert(0);
   }
   if ( !PL_get_nil_ex(tail) )
@@ -3186,20 +3326,53 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   }
 
   tail = PL_copy_term_ref(Ready);
-  for(int i = 0; i < nsubs; i++)
-  { if ( wset.subscriptions[i] &&
-	 !add_to_ready(tail, head, len, objs, wset.subscriptions[i]) )
-      OUTFAIL;
-  }
-  for(int i = 0; i < nclients; i++)
-  { if ( wset.clients[i] &&
-	 !add_to_ready(tail, head, len, objs, wset.clients[i]) )
-      OUTFAIL;
-  }
-  for(int i = 0; i < nservices; i++)
-  { if ( wset.services[i] &&
-	 !add_to_ready(tail, head, len, objs, wset.services[i]) )
-      OUTFAIL;
+  for(i=0, obj=objs; i<len; i++, obj++)
+  { int ready = FALSE;
+
+    if ( objs->ctype == &subscription_type )
+      ready = !!wset.subscriptions[obj->index];
+    else if ( obj->ctype == &client_type )
+      ready = !!wset.clients[obj->index];
+    else if ( obj->ctype == &service_type )
+      ready = !!wset.services[obj->index];
+    else if ( obj->ctype == &action_client_type )
+    { bool is_feedback_ready = false;
+      bool is_status_ready = false;
+      bool is_goal_response_ready = false;
+      bool is_cancel_response_ready = false;
+      bool is_result_response_ready = false;
+
+      TRY(rcl_action_client_wait_set_get_entities_ready(
+	      &wset, &obj->obj.action_client->action_client,
+	      &is_feedback_ready,
+	      &is_status_ready,
+	      &is_goal_response_ready,
+	      &is_cancel_response_ready,
+	      &is_result_response_ready));
+
+      if ( is_feedback_ready ||
+	   is_status_ready ||
+	   is_goal_response_ready ||
+	   is_cancel_response_ready ||
+	   is_result_response_ready )
+      { if ( !PL_unify_list_ex(tail, head, tail) ||
+	     !unify_action_client_ready(head, objs[i].symbol,
+					is_feedback_ready,
+					is_status_ready,
+					is_goal_response_ready,
+					is_cancel_response_ready,
+					is_result_response_ready) )
+	OUTFAIL;
+      }
+
+      continue;
+    }
+
+    if ( ready )
+    { if ( !PL_unify_list_ex(tail, head, tail) ||
+	   !PL_unify_atom(head, objs[i].symbol) )
+	OUTFAIL;
+    }
   }
   if ( !PL_unify_nil_ex(tail) )
     OUTFAIL;
@@ -3323,6 +3496,7 @@ install_librclswi(void)
   MKFUNCTOR(ros_error, 2);
   MKFUNCTOR(list, 1);
   MKFUNCTOR(list, 2);
+  MKFUNCTOR(action_client, 6);
   FUNCTOR_minus2 = PL_new_functor(PL_new_atom("-"), 2);
 
   MKATOM(argv);
@@ -3343,7 +3517,11 @@ install_librclswi(void)
   MKATOM(sequence_number);
   MKATOM(node);
   MKATOM(goal);
+  MKATOM(goal_request);
+  MKATOM(goal_response);
   MKATOM(result);
+  MKATOM(result_request);
+  MKATOM(result_response);
   MKATOM(feedback);
   MKATOM(action);
   MKATOM(ros);
@@ -3378,7 +3556,7 @@ install_librclswi(void)
 
   PRED("$ros_message_type",	     4,	ros_message_type,	    0);
   PRED("$ros_service_type",	     6,	ros_service_type,	    0);
-  PRED("$ros_action_type",	     8,	ros_action_type,	    0);
+  PRED("$ros_action_type",	     12,ros_action_type, PL_FA_VARARGS);
   PRED("$ros_type_introspection",    2,	ros_type_introspection,	    0);
   PRED("$ros_service_prop",	     3,	ros_service_prop,	    0);
   PRED("$ros_action_client_prop",    3,	ros_action_client_prop,	    0);
@@ -3410,6 +3588,7 @@ install_librclswi(void)
   PRED("ros_action_take_feedback", 2, ros_action_take_feedback, 0);
   PRED("ros_action_publish_status", 1, ros_action_publish_status, 0);
   PRED("ros_action_take_status", 2, ros_action_take_status, 0);
+  PRED("ros_action_notify_goal_done", 1, ros_action_notify_goal_done, 0);
 
   PRED("set_action_cancel_type",     1, set_action_cancel_type,     0);
   PRED("set_goal_status_type",     1, set_goal_status_type,     0);

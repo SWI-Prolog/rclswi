@@ -33,8 +33,8 @@ typedef struct rclswi_srv_type_t
 
 typedef struct rclswi_action_type_t
 { const rosidl_action_type_support_t *type_support;
-  rclswi_message_type_t goal;
-  rclswi_message_type_t result;
+  rclswi_srv_type_t goal;
+  rclswi_srv_type_t result;
   rclswi_message_type_t feedback;
 } rclswi_action_type_t;
 

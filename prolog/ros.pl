@@ -528,6 +528,7 @@ ros_subscribe(Node, MsgType, Topic, QoSProfile, Subscription) :-
 
 :- table ( ros_msg_type_support/2,
            ros_srv_type_support/2,
+           ros_action_type_support/2,
            load_type_support_shared_object/3
          ) as shared.
 
@@ -571,16 +572,22 @@ ros_action_type_support(ActType, ActFunctions) :-
     type_introspection_function_prefix(ISPrefix),
     type_support_function(ActType, Package, FuncPostfix),
     load_type_support(Package),
-    atom_concat(FuncPostfix, '_Goal', FuncPostfixGoal),
-    atom_concat(FuncPostfix, '_Result', FuncPostfixResult),
-    atom_concat(FuncPostfix, '_Feedback', FuncPostfixFeedback),
+    atom_concat(FuncPostfix, '_SendGoal_Request', FuncPostfixGoalRequest),
+    atom_concat(FuncPostfix, '_SendGoal_Response', FuncPostfixGoalResponse),
+    atom_concat(FuncPostfix, '_GetResult_Request', FuncPostfixResultRequest),
+    atom_concat(FuncPostfix, '_GetResult_Response', FuncPostfixResultResponse),
+    atom_concat(FuncPostfix, '_FeedbackMessage', FuncPostfixFeedback),
     atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
-    atomic_list_concat([ISPrefix, FuncPostfixGoal], '__', ISFuncGoal),
-    atomic_list_concat([ISPrefix, FuncPostfixResult], '__', ISFuncResult),
+    atomic_list_concat([ISPrefix, FuncPostfixGoalRequest], '__', ISFuncGoalRequest),
+    atomic_list_concat([ISPrefix, FuncPostfixGoalResponse], '__', ISFuncGoalResponse),
+    atomic_list_concat([ISPrefix, FuncPostfixResultRequest], '__', ISFuncResultRequest),
+    atomic_list_concat([ISPrefix, FuncPostfixResultResponse], '__', ISFuncResultResponse),
     atomic_list_concat([ISPrefix, FuncPostfixFeedback], '__', ISFuncFeedback),
-    '$ros_action_type'(ISFuncGoal, ISFuncResult, ISFuncFeedback,
+    '$ros_action_type'(ISFuncGoalRequest, ISFuncGoalResponse,
+                       ISFuncResultRequest, ISFuncResultResponse, ISFuncFeedback,
                        TSFunc,
-                       FuncPostfixGoal, FuncPostfixResult, FuncPostfixFeedback,
+                       FuncPostfixGoalRequest, FuncPostfixGoalResponse,
+                       FuncPostfixResultRequest, FuncPostfixResultResponse, FuncPostfixFeedback,
                        ActFunctions).
 
 
@@ -660,12 +667,36 @@ rwm_c_identifier(Id) :-
 %       }
 %    ```
 %
+%    When an actual message  is  translated   to/from  Prolog  some  ROS
+%    builtin types are handled special. Note  that when translating from
+%    Prolot to ROS both the  canonical   representation  and the special
+%    representation are accepted.  This list will probably extended, for
+%    example for dealing with time.
+%
+%      - uuid{uuid:list(uint8,16)}
+%        This is mapped to/from an atom using the hexadecimal UUID
+%        notation that is also used by uuid/1.
+%
 %    If RosType is a service, Description is   a  dict of type `service`
-%    with the keys `request` and `response`.
+%    with the keys `request` and `response`.   If  RosType is an action,
+%    Description is a dict with keys `goal`, `result` and `feedback`.
 
 ros_type_introspection(Type, Description) :-
     ros_type_support(Type, TypeBlob),
-    '$ros_type_introspection'(TypeBlob, Description).
+    '$ros_type_introspection'(TypeBlob, Description0),
+    simplify_action_type(Description0, Description).
+
+simplify_action_type(action{feedback:_{feedback:Feedback, goal_id:_},
+                            goal_request:_{goal:Goal,goal_id:_},
+                            goal_response:_,
+                            result_request:_,
+                            result_response:_{result:Result,status:_}},
+                     Description) =>
+    Description = action{goal:Goal,
+                         result:Result,
+                         feedback:Feedback}.
+simplify_action_type(TypeIn, TypeOut) =>
+    TypeOut = TypeIn.
 
 
 %!  ros_client_names_and_types_by_node(+Node, +NodeName, +NameSpace, -NamesAndTypes)

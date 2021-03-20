@@ -54,6 +54,7 @@ target_include_directories(rclswi
 ament_target_dependencies(rclswi
   "rcl"
   "rmw"
+  "rcl_action"
 )
 
 # Causes the visibility macros to use dllexport rather than dllimport,
@@ -74,6 +75,7 @@ install(FILES prolog/ros.pl
 )
 install(FILES prolog/ros/logging.pl
 	      prolog/ros/services.pl
+	      prolog/ros/actions.pl
 	      prolog/ros/clocks.pl
 	      prolog/ros/qos.pl
   DESTINATION prolog/ros
