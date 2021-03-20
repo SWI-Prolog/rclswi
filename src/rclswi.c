@@ -103,6 +103,7 @@ static functor_t FUNCTOR_minus2;
 static functor_t FUNCTOR_list1;
 static functor_t FUNCTOR_list2;
 static functor_t FUNCTOR_action_client6;
+static functor_t FUNCTOR_action_server5;
 
 
 		 /*******************************
@@ -3136,6 +3137,7 @@ typedef struct wait_obj
     rclswi_client_t        *client;
     rclswi_service_t	   *service;
     rclswi_action_client_t *action_client;
+    rclswi_action_server_t *action_server;
     rcl_event_t		   *events;
     void                   *ptr;
   } obj;				/* The pointer */
@@ -3160,6 +3162,23 @@ unify_action_client_ready(term_t head, atom_t blob,
 		         PL_BOOL, is_cancel_response_ready,
 		         PL_BOOL, is_result_response_ready);
 }
+
+
+static int
+unify_action_server_ready(term_t head, atom_t blob,
+			  bool is_goal_request_ready,
+			  bool is_cancel_request_ready,
+			  bool is_result_request_ready,
+			  bool is_goal_expired)
+{ return PL_unify_term(head,
+		       PL_FUNCTOR, FUNCTOR_action_server5,
+		         PL_ATOM, blob,
+		         PL_BOOL, is_goal_request_ready,
+		         PL_BOOL, is_cancel_request_ready,
+		         PL_BOOL, is_result_request_ready,
+		         PL_BOOL, is_goal_expired);
+}
+
 
 
 static rcl_ret_t
@@ -3196,6 +3215,13 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
 	TRY(rcl_action_wait_set_add_action_client(
 		wset, &client->action_client, NULL, NULL));
       }
+    } else if ( obj->ctype == &action_server_type )
+    { rclswi_action_server_t *server = obj->obj.action_server;
+      if ( !server->deleted )
+      { server->waiting = TRUE;
+	TRY(rcl_action_wait_set_add_action_server(
+		wset, &server->action_server, NULL));
+      }
     } else
       assert(0);
   }
@@ -3226,6 +3252,11 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
       client->waiting = FALSE;
       if ( client->deleted )
 	TRY_ANYWAY(rcl_action_client_fini(&client->action_client, client->node));
+    } else if ( obj->ctype == &action_server_type )
+    { rclswi_action_server_t *server = obj->obj.action_server;
+      server->waiting = FALSE;
+      if ( server->deleted )
+	TRY_ANYWAY(rcl_action_server_fini(&server->action_server, server->node));
     } else
       assert(0);
   }
@@ -3287,7 +3318,8 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
       nclients++;
     else if ( objs[i].ctype == &service_type )
       nservices++;
-    else if ( objs[i].ctype == &action_client_type )
+    else if ( objs[i].ctype == &action_client_type ||
+	      objs[i].ctype == &action_server_type )
     { nclients += 3; nsubs += 2;	/* needed? */
     } else
       assert(0);
@@ -3362,6 +3394,33 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
 					is_goal_response_ready,
 					is_cancel_response_ready,
 					is_result_response_ready) )
+	OUTFAIL;
+      }
+
+      continue;
+    } else if ( obj->ctype == &action_server_type )
+    { bool is_goal_request_ready = false;
+      bool is_cancel_request_ready = false;
+      bool is_result_request_ready = false;
+      bool is_goal_expired = false;
+
+      TRY(rcl_action_server_wait_set_get_entities_ready(
+	      &wset, &obj->obj.action_server->action_server,
+	      &is_goal_request_ready,
+	      &is_cancel_request_ready,
+	      &is_result_request_ready,
+	      &is_goal_expired));
+
+      if ( is_goal_request_ready ||
+	   is_cancel_request_ready ||
+	   is_result_request_ready ||
+	   is_goal_expired )
+      { if ( !PL_unify_list_ex(tail, head, tail) ||
+	     !unify_action_server_ready(head, objs[i].symbol,
+					is_goal_request_ready,
+					is_cancel_request_ready,
+					is_result_request_ready,
+				        is_goal_expired) )
 	OUTFAIL;
       }
 
@@ -3497,6 +3556,7 @@ install_librclswi(void)
   MKFUNCTOR(list, 1);
   MKFUNCTOR(list, 2);
   MKFUNCTOR(action_client, 6);
+  MKFUNCTOR(action_server, 5);
   FUNCTOR_minus2 = PL_new_functor(PL_new_atom("-"), 2);
 
   MKATOM(argv);

@@ -512,6 +512,35 @@ ros_subscribe(Node, MsgType, Topic, QoSProfile, Subscription) :-
     ros_msg_type_support(MsgType, TypeSupport),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription).
 
+%!  ros_wait(+Objects, +Timeout, -Ready) is semidet.
+%
+%   Wait for any of the resources in  Objects to become ready and return
+%   the ready objects in Ready.  Timeout  is   in  seconds  or  the atom
+%   `infinite`. If waiting finishes  due  to   a  timeout  the predicate
+%   fails. For most objects Ready simply   contains the object reference
+%   (a _blob_). Action clients and servers   return a compound term that
+%   both provides the ready object and the entities inside this compound
+%   object that are ready.  Waitalble objects currently are:
+%
+%     - subscription
+%     - publisher
+%     - service
+%       Ready contains handle
+%     - action_client
+%       Ready is a term as below.  Except for the `Handle`, all
+%       values are booleans (`true` or `false`).
+%
+%           action_client(Handle, Feedback, Status, Goal, Cancel, Result)
+%
+%     - action_server
+%       As for `action_client`, but the term is
+%
+%           action_server(Handle, Goal, Cancel, Result, Expired)
+%
+%   Waiting for message is  normally  achieved   using  more  high level
+%   primitives such as ros_spin/1.
+
+
 %!  ros_msg_type_support(+MsgType, -TypeSupport) is det.
 %!  ros_srv_type_support(+SrvType, -TypeSupport) is det.
 %
