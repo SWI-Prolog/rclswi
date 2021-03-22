@@ -18,7 +18,8 @@
 
 typedef struct c_pointer_type
 { const char   *type;			/* Type of the pointer */
-  void	      (*free)(void *);		/* Free pointer */
+  const void  (*free)(void *);		/* Free pointer */
+  atom_t	name;			/* Type as atom */
 } c_pointer_type;
 
 int	unify_pointer(term_t t, void *ptr, const c_pointer_type *type);
@@ -27,5 +28,6 @@ int	get_pointer_and_symbol(term_t t, void **ptr, atom_t *symbol,
 			       const c_pointer_type *type);
 int	get_pointer_ex(term_t t, void **ptr, atom_t *symbol,
 		       const c_pointer_type **type);
+int	get_pointer_type(term_t t, void **ptr, const c_pointer_type **type);
 
 #endif /*SWI_POINTER_H_INCLUDED*/

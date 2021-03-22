@@ -138,3 +138,21 @@ get_pointer_ex(term_t t, void **ptr, atom_t *symbol, const c_pointer_type **type
 
   return PL_type_error("ros_object", t);
 }
+
+int
+get_pointer_type(term_t t, void **ptr, const c_pointer_type **type)
+{ c_ptr *ref;
+  PL_blob_t *btype;
+  atom_t a;
+
+  if ( PL_get_atom(t, &a) &&
+       (ref=PL_blob_data(a, NULL, &btype)) &&
+       btype == &c_ptr_blob )
+  { *ptr    = (void*)ref->ptr;
+    *type   = ref->type;
+
+    return TRUE;
+  }
+
+  return FALSE;
+}

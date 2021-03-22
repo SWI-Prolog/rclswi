@@ -51,6 +51,17 @@ void	print_error(rcl_ret_t ret, const char *file, int line, const char *goal);
 	  }				\
 	} while(0)
 
+#define TRY_SILENT(goal) \
+	do				\
+	{ if ( rc )			\
+	  { DEBUG(11, Sdprintf("Running %s -> ", #goal)); \
+	    rcl_ret_t __ret = (goal);	\
+	    DEBUG(11, Sdprintf("%d\n", __ret)); \
+	    if ( __ret != RCL_RET_OK )	\
+	      rc = set_error(__ret);	\
+	  }				\
+	} while(0)
+
 #define TRY_ANYWAY(goal) \
 	do				\
 	{ DEBUG(9, Sdprintf("Running (rc=%d) %s -> ", rc, #goal)); \

@@ -19,6 +19,7 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <math.h>
 
 #include <rcl/error_handling.h>
 #include <rcl/expand_topic_name.h>
@@ -121,73 +122,73 @@ static void free_rcl_action_client(void*);
 static void free_rcl_action_server(void*);
 static void free_rwm_service_info(void*);
 
-static const c_pointer_type context_type =
-{ "rcl_context_t",
+static c_pointer_type context_type =
+{ "ros_context",
   free_rcl_context
 };
 
-static const c_pointer_type node_type =
-{ "rcl_node_t",
+static c_pointer_type node_type =
+{ "ros_node",
   free_rcl_node
 };
 
-static const c_pointer_type publisher_type =
-{ "rcl_publisher_t",
+static c_pointer_type publisher_type =
+{ "ros_publisher",
   free_rcl_publisher
 };
 
-static const c_pointer_type subscription_type =
-{ "rcl_subscription_t",
+static c_pointer_type subscription_type =
+{ "ros_subscription",
   free_rcl_subscription
 };
 
-static const c_pointer_type rclswi_message_type_type =
-{ "rcl_message_type_t",
+static c_pointer_type rclswi_message_type_type =
+{ "ros_message_type",
   NULL
 };
 
-static const c_pointer_type client_type =
-{ "rcl_client_t",
+static c_pointer_type client_type =
+{ "ros_client",
   free_rcl_client
 };
 
-static const c_pointer_type service_type =
-{ "rcl_service_t",
+static c_pointer_type service_type =
+{ "ros_service",
   free_rcl_service
 };
 
-static const c_pointer_type clock_type =
-{ "rcl_clock_t",
+static c_pointer_type clock_type =
+{ "ros_clock",
   free_rcl_clock
 };
 
-static const c_pointer_type action_client_type =
-{ "rcl_action_client_t",
+static c_pointer_type action_client_type =
+{ "ros_action_client",
   free_rcl_action_client
 };
 
-static const c_pointer_type action_server_type =
-{ "rcl_action_server_t",
+static c_pointer_type action_server_type =
+{ "ros_action_server",
   free_rcl_action_server
 };
 
-static const c_pointer_type rwm_service_info_type =
-{ "rmw_service_info_t",
+static c_pointer_type rwm_service_info_type =
+{ "ros_service_info",
   free_rwm_service_info
 };
 
-static const c_pointer_type rmw_request_id_type =
-{ "rmw_request_id_t",
+static c_pointer_type rmw_request_id_type =
+{ "ros_request_id",
   free
 };
 
-static const c_pointer_type rclswi_srv_type_type =
-{ "rclswi_service_type_t",
+static c_pointer_type rclswi_srv_type_type =
+{ "ros_service_type",
   NULL
 };
 
-static const c_pointer_type rclswi_action_type_type =
-{ "rclswi_action_type_t",
+static c_pointer_type rclswi_action_type_type =
+{ "ros_action_type",
   NULL
 };
 
@@ -238,6 +239,30 @@ print_error(rcl_ret_t ret, const char *file, int line, const char *goal)
 	   file, line, goal, rcl_get_error_string().str);
   rcl_reset_error();
 }
+
+
+		 /*******************************
+		 *	      TYPES		*
+		 *******************************/
+
+/** '$ros_object_type'(@Term, -Type) is semidet.
+ */
+
+static foreign_t
+ros_object_type(term_t Ptr, term_t Type)
+{ c_pointer_type *type;
+  void *obj;
+
+  if ( get_pointer_type(Ptr, &obj, (const c_pointer_type**)&type) )
+  { if ( !type->name )
+      type->name = PL_new_atom(type->type);
+
+    return PL_unify_atom(Type, type->name);
+  }
+
+  return FALSE;
+}
+
 
 		 /*******************************
 		 *	      CONTEXT		*
@@ -1547,7 +1572,7 @@ ros_action_send_cancel_request(term_t ActionClient, term_t Message, term_t SeqNu
 			       };
 
   rc = prepare_send_request(&ctx);
-  TRY(rcl_action_send_result_request(&action_client->action_client,
+  TRY(rcl_action_send_cancel_request(&action_client->action_client,
 				     &ctx.msg, &ctx.seq_number));
   return finish_send_request(&ctx, rc);
 }
@@ -2721,6 +2746,20 @@ put_uuid_message(term_t Message, void *msg,
   return put_guid(Message, (uint8_t*)msg+mem->offset_);
 }
 
+static int
+is_time_message(const rosidl_typesupport_introspection_c__MessageMembers *members)
+{ if ( members->member_count_ == 2 )
+  { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
+    return ( mem[0].type_id_ == rosidl_typesupport_introspection_c__ROS_TYPE_INT32 &&
+	     mem[1].type_id_ == rosidl_typesupport_introspection_c__ROS_TYPE_UINT32 &&
+	     strcmp(mem[0].name_, "sec") == 0 &&
+	     strcmp(mem[1].name_, "nanosec") == 0 );
+  }
+
+  return FALSE;
+}
+
+
 #define FAST_KEYS 32
 
 static int
@@ -3051,12 +3090,23 @@ fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
 { const rosidl_typesupport_introspection_c__MessageMembers *members = ts->data;
   term_t Value;
   int rc;
+  double time;
 
   if ( is_uuid_message(members) )
   { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
     if ( (rc=fill_uuid(Message, (uint8_t*)msg+mem->offset_)) ||
 	 PL_exception(0) )
       return rc;
+  } else if ( is_time_message(members) && PL_get_float(Message, &time) )
+  { const rosidl_typesupport_introspection_c__MessageMember *mem = members->members_;
+    int32_t  *secp  = (int32_t* )((char*)msg+mem[0].offset_);
+    uint32_t *nsecp = (uint32_t*)((char*)msg+mem[1].offset_);
+    double ip;
+
+    *nsecp = (uint32_t)(modf(time, &ip)*1000000000.0);
+    *secp  = (int32_t)ip;
+
+    return TRUE;
   }
 
   if ( !(Value = PL_new_term_ref()) )
@@ -3188,39 +3238,39 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
   wait_obj *obj;
   size_t i;
 
-  TRY(rcl_wait_set_clear(wset));
+  TRY_SILENT(rcl_wait_set_clear(wset));
   for(i=0, obj=objs; i<len && rc; i++, obj++)
   { if ( obj->ctype == &subscription_type )
     { rclswi_subscription_t *sub = obj->obj.swi_subscription;
       if ( !sub->deleted )
       { sub->waiting = TRUE;
-	TRY(rcl_wait_set_add_subscription(wset, &sub->subscription, &obj->index));
+	TRY_SILENT(rcl_wait_set_add_subscription(wset, &sub->subscription, &obj->index));
       }
     } else if ( obj->ctype == &client_type )
     { rclswi_client_t *client = obj->obj.client;
       if ( !client->deleted )
       { client->waiting = TRUE;
-	TRY(rcl_wait_set_add_client(wset, &client->client, &obj->index));
+	TRY_SILENT(rcl_wait_set_add_client(wset, &client->client, &obj->index));
       }
     } else if ( obj->ctype == &service_type )
     { rclswi_service_t *service = obj->obj.service;
       if ( !service->deleted )
       { service->waiting = TRUE;
-	TRY(rcl_wait_set_add_service(wset, &service->service, &obj->index));
+	TRY_SILENT(rcl_wait_set_add_service(wset, &service->service, &obj->index));
       }
     } else if ( obj->ctype == &action_client_type )
     { rclswi_action_client_t *client = obj->obj.action_client;
       if ( !client->deleted )
       { client->waiting = TRUE;
-	TRY(rcl_action_wait_set_add_action_client(
-		wset, &client->action_client, NULL, NULL));
+	TRY_SILENT(rcl_action_wait_set_add_action_client(
+		       wset, &client->action_client, NULL, NULL));
       }
     } else if ( obj->ctype == &action_server_type )
     { rclswi_action_server_t *server = obj->obj.action_server;
       if ( !server->deleted )
       { server->waiting = TRUE;
-	TRY(rcl_action_wait_set_add_action_server(
-		wset, &server->action_server, NULL));
+	TRY_SILENT(rcl_action_wait_set_add_action_server(
+		       wset, &server->action_server, NULL));
       }
     } else
       assert(0);
@@ -3318,9 +3368,10 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
       nclients++;
     else if ( objs[i].ctype == &service_type )
       nservices++;
-    else if ( objs[i].ctype == &action_client_type ||
-	      objs[i].ctype == &action_server_type )
+    else if ( objs[i].ctype == &action_client_type )
     { nclients += 3; nsubs += 2;	/* needed? */
+    } else if ( objs[i].ctype == &action_server_type )
+    { nservices += 3; ntimers += 1;
     } else
       assert(0);
   }
@@ -3329,7 +3380,7 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
 
   rcl_wait_set_t wset = rcl_get_zero_initialized_wait_set();
   DEBUG(3, Sdprintf("rcl_wait(): %d subscriptions; "
-				"%d clients; ",
+				"%d clients; "
 				"%d services\n",
 		    nsubs, nclients, nservices));
   TRY(rcl_wait_set_init(&wset,
@@ -3338,8 +3389,9 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   int wset_initted = TRUE;
 
   rcl_ret_t ret = RCL_RET_TIMEOUT;
-  while ( tmo_nsec > WAIT_POLL && ret == RCL_RET_TIMEOUT )
-  { tmo_nsec -= WAIT_POLL;
+  while ( (tmo_nsec == -1 || tmo_nsec > WAIT_POLL) && ret == RCL_RET_TIMEOUT )
+  { if ( tmo_nsec > WAIT_POLL )
+      tmo_nsec -= WAIT_POLL;
     ret = rclswi_wait(&wset, WAIT_POLL, objs, len);
     if ( PL_handle_signals() < 0 )
       OUTFAIL;
@@ -3354,7 +3406,7 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   { rc = PL_unify_nil_ex(Ready);
     goto out;
   } else
-  { TRY(ret);
+  { TRY_SILENT(ret);
   }
 
   tail = PL_copy_term_ref(Ready);
@@ -3381,6 +3433,13 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
 	      &is_goal_response_ready,
 	      &is_cancel_response_ready,
 	      &is_result_response_ready));
+
+      DEBUG(3, Sdprintf("action client ready:%s%s%s%s%s\n",
+			is_feedback_ready ? " feedback" : "",
+			is_status_ready ? " status" : "",
+			is_goal_response_ready ? " goal" : "",
+			is_cancel_response_ready ? " cancel" : "",
+			is_result_response_ready ? " result" : ""));
 
       if ( is_feedback_ready ||
 	   is_status_ready ||
@@ -3595,6 +3654,7 @@ install_librclswi(void)
 #define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
 
   PRED("ros_debug",		     1,	ros_debug,		    0);
+  PRED("$ros_object_type",	     2, ros_object_type,	    0);
 
   PRED("ros_create_context",	     1,	ros_create_context,	    0);
   PRED("ros_init",		     3,	ros_init,		    0);

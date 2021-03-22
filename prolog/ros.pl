@@ -46,7 +46,8 @@
             ros_default_context/1,      % -Context
             ros_default_node/1,         % -Node
 
-            ros_identifier_prolog/2     % ?RosName, ?PrologName
+            ros_identifier_prolog/2,    % ?RosName, ?PrologName
+            ros_object/2                % ?Object, ?Type
           ]).
 :- autoload(library(error),
             [must_be/2, existence_error/2, domain_error/2, instantiation_error/1]).
@@ -742,6 +743,19 @@ simplify_action_type(TypeIn, TypeOut) =>
 %                 ['turtlesim/action/RotateAbsolute_SendGoal']
 %           ].
 %   ```
+
+
+%!  ros_object(?Object, ?Type) is nondet.
+%
+%   True when Object is a handle to a ROS object of type Type.
+
+ros_object(Object, Type) :-
+    nonvar(Object),
+    !,
+    '$ros_object_type'(Object, Type).
+ros_object(Object, Type) :-
+    current_blob(Object, c_ptr),
+    '$ros_object_type'(Object, Type).
 
 
 %!  ros_property(?Property)

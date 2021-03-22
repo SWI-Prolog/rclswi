@@ -4,11 +4,11 @@
 :- module(actions,
           [ type/0,
             type/1,                     % +ServiceName
-            client/2,
-            rotate/2,
-            echo_feedback/0,
-            order/2,
-            spin/1
+            fib/1,
+            fib_to/2,
+            rotate/1,
+            mock_cancel/0,
+            server/0
           ]).
 :- use_module(library(pprint)).
 :- use_module(library(debug)).
@@ -17,8 +17,9 @@
 
 :- reexport(library(ros)).
 :- reexport(library(ros/actions)).
+:- reexport(library(ros/services)).
 
-:- debug(ros(spin)).
+% :- debug(ros(spin)).
 
 /** <module>
 
@@ -31,6 +32,14 @@ Getting to understand actions by using the low-level API.
 :- ros_set_defaults(
        [ node(swi_action, [])
        ]).
+:- ros_action(
+       '/fibonacci',
+       'action_tutorials_interfaces/action/Fibonacci',
+       []).
+:- ros_action(
+       '/turtle1/rotate_absolute',
+       'turtlesim/action/RotateAbsolute',
+       []).
 
 %!  type is det.
 %!  type(+ActionName) is det.
@@ -45,90 +54,122 @@ type(Name) :-
     ros_type_introspection(Name, Type),
     print_term(Type, []).
 
-%!  echo_feedback
-%
-%   This works.  Type info is
-%     rotate_absolute__feedback_message{feedback:rotate_absolute__feedback{remaining:float},
-%					goal_id:uuid{uuid:list(uint8, 16)}}
 
-echo_feedback :-
-    ros_subscribe('/turtle1/rotate_absolute/_action/feedback',
-                  on_feedback,
-                  [ message_type('turtlesim/action/RotateAbsolute_FeedbackMessage')
-                  ]),
-    ros_spin.
+fib(N) :-
+    ros_action_run('/fibonacci', _{order:N}, echo, []).
 
-on_feedback(Feedback) :-
-    ansi_format(comment, 'Feedback: ~p~n', [Feedback]).
+rotate(To) :-
+    with_tty_raw(ros_action_run('/turtle1/rotate_absolute', _{theta:To}, echo, [])).
+
+echo -->
+    [feedback(_)],
+    { poll_char(q),
+      !,
+      format('Typed Q.  Cancelling ...~n'),
+      fail
+    }.
+echo -->
+    [Msg],
+    !,
+    { format('Got ~p~n', [Msg]) },
+    echo.
+echo -->
+    [].
+
+poll_char(C) :-
+    wait_for_input([user_input], Ready, 0),
+    Ready = [user_input],
+    get_char(user_input, C).
+
+fib_to(N, Max) :-
+    ros_action_run('/fibonacci', _{order:N}, on_fib_to(Max), []).
+
+on_fib_to(Max) -->
+    [ feedback(Msg) ],
+    { last(Msg.partial_sequence, Last),
+      Last > Max,
+      format('Oops, ~D is too big; requesting cancel~n', [Last]),
+      !,
+      fail
+    }.
+on_fib_to(Max) -->
+    [Msg],
+    !,
+    { format('Got ~p~n', [Msg]) },
+    on_fib_to(Max).
+on_fib_to(_) -->
+    [].
 
 
-:- table (client/2) as shared.
 
-client(turtlesim, Client) :-
-    ros_action_client('/turtle1/rotate_absolute',
+mock_cancel :-
+    ros_client('/turtle1/rotate_absolute/_action/cancel',
+               'action_msgs/srv/CancelGoal',
+               Client, []),
+    get_time(Now),
+    ros_call(Client, _{goal_info:_{stamp:Now}}, Response),
+    pp(Response).
+
+
+		 /*******************************
+		 *       SERVER EXPERIMENT	*
+		 *******************************/
+
+server :-
+    ros_debug(10),
+    debug(ros(_)),
+    ros_default_context(Context),
+    ros:ros_create_clock(Context, system, Clock),
+    ros_action_server('/turtle1/rotate_absolute',
                       'turtlesim/action/RotateAbsolute',
-                      Client, []).
+                      Server,
+                      [ clock(Clock) ]),
+    server_loop(Server).
 
-client(fibonacci, Client) :-
-    ros_action_client('/fibonacci',
-                      'action_tutorials_interfaces/action/Fibonacci',
-                      Client, []).
+server_loop(Server) :-
+    ros_wait([Server], infinite, Ready),
+    Ready = [action_server(Server, Goal, Cancel, Result, Expired)],
+    server_action(Server, Goal, Cancel, Result, Expired),
+    server_loop(Server).
 
-rotate(To, SeqNum) :-
-    client(turtlesim, Client),
-    uuid(UUID),
-    ros:ros_action_send_goal_request(Client,
-                                     _{goal_id:UUID,
-                                       goal:_{theta:To}},
-                                     SeqNum).
+server_action(Server, Goal, Cancel, Result, Expired) :-
+    server_action(Goal, Server, goal),
+    server_action(Cancel, Server, cancel),
+    server_action(Result, Server, result),
+    server_action(Expired, Server, expired).
 
+server_action(true, Server, Type) :-
+    catch(server_action(Type, Server),
+          E,
+          print_message(warning, E)).
+server_action(false, _, _).
 
-order(N, SeqNum) :-
-    client(fibonacci, Client),
-    uuid(UUID),
-    ros:ros_action_send_goal_request(Client,
-                                     _{goal_id:UUID,
-                                       goal:_{order:N}},
-                                     SeqNum).
+server_action(goal, Server) :-
+    ros:ros_action_take_goal_request(Server, Request, Info),
+    debug(ros(action), 'Got goal request ~p, info ~p', [Request, Info]),
+    get_time(Now),
+    ros:ros_action_send_goal_response(Server, _{accepted:true, stamp:Now}, Info),
+    run_goal(Request.goal, Server, Request.goal_id).
+server_action(cancel, Server) :-
+    ros:ros_action_take_cancel_request(Server, Request, Info),
+    debug(ros(action), 'Got cancel request ~p, info ~p', [Request, Info]).
+server_action(result, Server) :-
+    ros:ros_action_take_result_request(Server, Request, Info),
+    debug(ros(action), 'Got result request ~p, info ~p', [Request, Info]).
+server_action(expired, Server) :-
+    debug(ros(action), 'Got expired event', [Server]).
 
-spin(Who) :-
-    client(Who, Client),
-    repeat,
-       ros_wait([Client], 10, Ready),
-       !,
-    maplist(actions, Ready),
-    spin(Who).
+run_goal(Goal, Server, GoalID) :-
+    Theta = Goal.theta,
+    run(Theta, Server, GoalID).
 
-actions(action_client(Client, Feedback, Status, Goal, Cancel, Result)) :-
-    action(Feedback, feedback, Client),
-    action(Status,   status,   Client),
-    action(Goal,     goal,     Client),
-    action(Cancel,   cancel,   Client),
-    action(Result,   result,   Client).
+run(Theta, Server, GoalID) :-
+    Theta =< 0,
+    set_succeeded(Server, GoalID).
+run(Theta, Server, GoalID) :-
+    ros:ros_action_publish_feedback(Server, _{feedback:_{remaining:Theta},
+                                              goal_id:GoalID}),
+    Theta2 is Theta - 1,
+    run(Theta2, Server, GoalID).
 
-action(true, Type, Client) =>
-    debug(ros(spin), 'Action client ~p ready for ~p', [Client,Type]),
-    (   catch(action(Type, Client), E,
-              print_message(warning, E))
-    ->  true
-    ;   true
-    ).
-action(false, _Type, _Client) =>
-    true.
-
-action(feedback, Client) =>
-    ros:ros_action_take_feedback(Client, Feedback),
-    ansi_format(comment, 'Feedback: ~p~n', [Feedback]).
-action(status, Client) =>
-    ros:ros_action_take_status(Client, Status),
-    ansi_format(comment, 'Status: ~p~n', [Status]).
-action(goal, Client) =>
-    ros:ros_action_take_goal_response(Client, GoalResponse, MsgInfo),
-    ansi_format(comment, 'GoalResponse: ~p; Info: ~p~n', [GoalResponse, MsgInfo]).
-action(cancel, Client) =>
-    ros:ros_action_take_cancel_response(Client, CancelResponse, MsgInfo),
-    ansi_format(comment, 'CancelResponse: ~p; Info: ~p~n', [CancelResponse, MsgInfo]).
-action(result, Client) =>
-    ros:ros_action_take_result_response(Client, ResultResponse, MsgInfo),
-    ansi_format(comment, 'ResultResponse: ~p; Info: ~p~n', [ResultResponse, MsgInfo]).
 
