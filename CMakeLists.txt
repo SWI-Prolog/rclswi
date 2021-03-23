@@ -40,6 +40,7 @@ endif()
 
 add_library(rclswi SHARED
   src/rclswi.c
+  src/common.c
   src/logging.c
   src/pointer.c
   src/qos.c

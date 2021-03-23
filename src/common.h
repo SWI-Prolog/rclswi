@@ -98,6 +98,23 @@ extern int	get_utf8_name_ex(term_t t, char **name);
 
 
 		 /*******************************
+		 *	    ENUM SUPPORT	*
+		 *******************************/
+
+typedef struct enum_decl
+{ int		value;
+  const char   *name;
+  atom_t	atom;
+} enum_decl;
+
+#define EN_DECL(value, name) { (int)value, #name, 0 }
+#define EN_END()	     { 0, NULL, 0 }
+
+int	get_enum(term_t t, const char *domain, enum_decl *decl, int *value);
+int	put_enum(term_t t, enum_decl *decl, int value);
+
+
+		 /*******************************
 		 *	   REGISTRATION		*
 		 *******************************/
 

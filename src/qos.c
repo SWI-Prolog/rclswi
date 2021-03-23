@@ -46,16 +46,6 @@ get_qos_profile(term_t t, rmw_qos_profile_t **profile)
 { return get_pointer(t, (void**)profile, &qos_profile_type);
 }
 
-
-typedef struct enum_decl
-{ int		value;
-  const char   *name;
-  atom_t	atom;
-} enum_decl;
-
-#define EN_DECL(value, name) { (int)value, #name, 0 }
-#define EN_END()	     { 0, NULL, 0 }
-
 static enum_decl enum_history[] =
 { EN_DECL(RMW_QOS_POLICY_HISTORY_SYSTEM_DEFAULT,     system_default),
   EN_DECL(RMW_QOS_POLICY_HISTORY_KEEP_LAST,          keep_last),
@@ -90,27 +80,6 @@ static enum_decl enum_liveliness[] =
   EN_DECL(RMW_QOS_POLICY_LIVELINESS_UNKNOWN,	     unknown),
   EN_END()
 };
-
-
-static int
-get_enum(term_t t, const char *domain, enum_decl *decl, int *value)
-{ atom_t a;
-
-  if ( PL_get_atom_ex(t, &a) )
-  { for(; decl->name; decl++)
-    { if ( !decl->atom )
-	decl->atom = PL_new_atom(decl->name);
-
-      if ( decl->atom == a )
-      { *value = decl->value;
-	return TRUE;
-      }
-    }
-
-    return PL_domain_error(domain,  t);
-  } else
-    return FALSE;
-}
 
 
 static int
@@ -224,20 +193,6 @@ out:
     free(profile);
 
   return rc;
-}
-
-
-static int
-put_enum(term_t t, enum_decl *decl, int value)
-{ for(; decl->name; decl++)
-  { if ( decl->value == value )
-    { if ( !decl->atom )
-	decl->atom = PL_new_atom(decl->name);
-      return PL_put_atom(t, decl->atom);
-    }
-  }
-
-  return PL_unify_integer(t, value);
 }
 
 

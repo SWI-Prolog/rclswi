@@ -64,6 +64,8 @@ static int	put_message(term_t Message, void *msg,
 static int	fill_message(term_t Message, void *msg,
 			     const rosidl_message_type_support_t *ts,
 			     int noarray);
+static int	fill_uuid(term_t t, void *msg);
+static int	fill_time_stamp(term_t Stamp, builtin_interfaces__msg__Time *tp, int ex);
 static int	get_timeout_nsec(term_t Timeout, int64_t *tmo);
 
 static atom_t ATOM_argv;
@@ -97,6 +99,9 @@ static atom_t ATOM_steady;
 static atom_t ATOM_clock;
 static atom_t ATOM_context;
 static atom_t ATOM_type;
+static atom_t ATOM_goal_id;
+static atom_t ATOM_stamp;
+static atom_t ATOM_goal_info;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -121,6 +126,7 @@ static void free_rcl_clock(void*);
 static void free_rcl_action_client(void*);
 static void free_rcl_action_server(void*);
 static void free_rwm_service_info(void*);
+static void free_goal_handle(void*);
 
 static c_pointer_type context_type =
 { "ros_context",
@@ -192,6 +198,10 @@ static c_pointer_type rclswi_action_type_type =
   NULL
 };
 
+static c_pointer_type goal_handle_type =
+{ "ros_goal_handle",
+  free_goal_handle
+};
 
 		 /*******************************
 		 *	      DEBUG		*
@@ -933,7 +943,7 @@ put_hex(char **out, uint8_t byte)
 }
 
 static int
-put_guid(term_t t, const uint8_t guid[16])
+put_guid(term_t t, const uint8_t *guid)
 { char out[36];
   char *o = out;
 
@@ -952,6 +962,15 @@ put_time_stamp(term_t t, int64_t stamp)
 
   return PL_put_float(t, d);
 }
+
+static int
+put_msg_time(term_t Stamp, const builtin_interfaces__msg__Time *tp)
+{ double d = (double)tp->sec + (double)tp->nanosec/1000000000.0;
+
+  return PL_put_float(Stamp, d);
+}
+
+
 
 static int
 put_rwm_request_id(term_t t, const rmw_request_id_t *request_id)
@@ -1658,8 +1677,8 @@ ros_action_take_result_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
   };
 
   rc = action_prepare_take_request(&ctx);
-  TRY(rcl_action_take_goal_request(&action_server->action_server,
-				   ctx.header, ctx.msg));
+  TRY(rcl_action_take_result_request(&action_server->action_server,
+				     ctx.header, ctx.msg));
   return action_finish_take_request(&ctx, rc);
 }
 
@@ -1682,8 +1701,8 @@ ros_action_take_cancel_request(term_t ActionServer, term_t Msg, term_t MsgInfo)
   };
 
   rc = action_prepare_take_request(&ctx);
-  TRY(rcl_action_take_goal_request(&action_server->action_server,
-				   ctx.header, ctx.msg));
+  TRY(rcl_action_take_cancel_request(&action_server->action_server,
+				     ctx.header, ctx.msg));
   return action_finish_take_request(&ctx, rc);
 }
 
@@ -2062,6 +2081,152 @@ ros_action_notify_goal_done(term_t ActionServer)
 
   return rc;
 }
+
+
+static int
+put_msg_goal_info(term_t Info, const rcl_action_goal_info_t *goal_info)
+{ atom_t keys[] = { ATOM_goal_id, ATOM_stamp };
+  term_t values = 0;
+  int rc;
+
+  rc = ( (values = PL_new_term_refs(2)) &&
+	 put_guid(values+0, goal_info->goal_id.uuid) &&
+	 put_msg_time(values+1, &goal_info->stamp) &&
+	 PL_put_dict(Info, ATOM_goal_info, 2, keys, values)
+       );
+
+  if ( values )
+    PL_reset_term_refs(values);
+
+  return rc;
+}
+
+static foreign_t
+ros_action_expire_goals(term_t ActionServer, term_t MaxNumGoals, term_t Expired)
+{ rclswi_action_server_t *action_server;
+  size_t max_num_goals;
+  size_t num_expired;
+  int rc = TRUE;
+  rcl_action_goal_info_t *expired_goals;
+  term_t list = PL_new_term_ref();
+  term_t head = PL_new_term_ref();
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) ||
+       !PL_get_size_ex(MaxNumGoals, &max_num_goals) )
+    return FALSE;
+
+  if ( !(expired_goals=malloc(sizeof(*expired_goals)*max_num_goals)) )
+    return PL_resource_error("memory");
+
+  TRY(rcl_action_expire_goals(&action_server->action_server,
+			      expired_goals, max_num_goals, &num_expired));
+
+  if ( rc )
+  { PL_put_nil(list);
+    for(size_t i=num_expired; --i>=0; )
+    { if ( !put_msg_goal_info(head, &expired_goals[i]) ||
+	   !PL_cons_list(list, head, list) )
+	OUTFAIL;
+    }
+    rc = PL_unify(list, Expired);
+  }
+
+out:
+  free(expired_goals);
+  return rc;
+}
+
+
+
+static void
+free_goal_handle(void *ptr)
+{ rcl_action_goal_handle_t *goal_handle = ptr;
+
+  TRYVOID(rcl_action_goal_handle_fini(goal_handle));
+}
+
+
+/** ros_action_accept_new_goal(+Server, +GoalID, +Stamp, -GoalHandle)
+ */
+
+static foreign_t
+ros_action_accept_new_goal(term_t ActionServer, term_t GoalID, term_t Stamp,
+			   term_t GoalHandle)
+{ rclswi_action_server_t *action_server;
+  int rc = TRUE;
+  rcl_action_goal_info_t goal_info = rcl_action_get_zero_initialized_goal_info();
+  rcl_action_goal_handle_t *goal_handle;
+
+  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+    return FALSE;
+
+  if ( !fill_uuid(GoalID, &goal_info.goal_id.uuid) )
+    return PL_type_error("UUID", GoalID);
+  if ( !fill_time_stamp(Stamp, &goal_info.stamp, TRUE) )
+    return FALSE;
+
+  if ( !(goal_handle = rcl_action_accept_new_goal(&action_server->action_server,
+						  &goal_info)) )
+  { set_error(0);
+    OUTFAIL;
+  }
+
+  rc = rc && unify_pointer(GoalHandle, goal_handle, &goal_handle_type);
+
+out:
+  return rc;
+}
+
+
+static enum_decl enum_action_goal_event[] =
+{ EN_DECL(GOAL_EVENT_EXECUTE,	  execute),
+  EN_DECL(GOAL_EVENT_CANCEL_GOAL, cancel_goal),
+  EN_DECL(GOAL_EVENT_SUCCEED,	  succeed),
+  EN_DECL(GOAL_EVENT_ABORT,       abort),
+  EN_DECL(GOAL_EVENT_CANCELED,    canceled),
+  EN_END()
+};
+
+static foreign_t
+ros_action_update_goal_state(term_t GoalHandle, term_t State)
+{ rcl_action_goal_handle_t *goal_handle;
+  rcl_action_goal_event_t event;
+  int rc = TRUE;
+
+  if ( !get_pointer(GoalHandle, (void**)&goal_handle, &goal_handle_type) )
+    return FALSE;
+  if ( !get_enum(State, "action_goal_event", enum_action_goal_event, (int*)&event) )
+    return FALSE;
+
+  TRY(rcl_action_update_goal_state(goal_handle, event));
+
+  return rc;
+}
+
+
+static foreign_t
+ros_action_goal_prop(term_t GoalHandle, term_t Prop, term_t Value)
+{ rcl_action_goal_handle_t *goal_handle;
+  atom_t prop;
+  int rc = TRUE;
+
+  if ( !get_pointer(GoalHandle, (void**)&goal_handle, &goal_handle_type) ||
+       !PL_get_atom_ex(Prop, &prop) )
+    return FALSE;
+
+  if ( prop == ATOM_goal_info )
+  { rcl_action_goal_info_t info = rcl_action_get_zero_initialized_goal_info();
+    term_t tmp = PL_new_term_ref();
+
+    TRY(rcl_action_goal_handle_get_info(goal_handle, &info));
+    rc = rc && put_msg_goal_info(tmp, &info) &&
+	       PL_unify(tmp, Value);
+  } else
+    rc = FALSE;
+
+  return rc;
+}
+
 
 
 		 /*******************************
@@ -2864,6 +3029,21 @@ fill_uuid(term_t t, void *msg)
   return FALSE;
 }
 
+static int
+fill_time_stamp(term_t Stamp, builtin_interfaces__msg__Time *tp, int ex)
+{ double d;
+  int rc;
+
+  rc = ex ? PL_get_float_ex(Stamp, &d) : PL_get_float(Stamp, &d);
+  if ( rc )
+  { double ip;
+
+    tp->nanosec = (uint32_t)(modf(d, &ip)*1000000000.0);
+    tp->sec     = (int32_t)ip;
+  }
+
+  return rc;
+}
 
 
 #include <rosidl_runtime_c/primitives_sequence_functions.h>
@@ -3649,6 +3829,9 @@ install_librclswi(void)
   MKATOM(clock);
   MKATOM(context);
   MKATOM(type);
+  MKATOM(goal_id);
+  MKATOM(stamp);
+  MKATOM(goal_info);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 #define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
@@ -3681,6 +3864,7 @@ install_librclswi(void)
   PRED("$ros_service_prop",	     3,	ros_service_prop,	    0);
   PRED("$ros_action_client_prop",    3,	ros_action_client_prop,	    0);
   PRED("$ros_action_server_prop",    3,	ros_action_server_prop,	    0);
+  PRED("$ros_action_goal_prop",      3,	ros_action_goal_prop,	    0);
   PRED("$ros_clock_prop",            3,	ros_clock_prop,	            0);
 
   PRED("ros_wait",		     3,	ros_wait,		    0);
@@ -3709,6 +3893,9 @@ install_librclswi(void)
   PRED("ros_action_publish_status", 1, ros_action_publish_status, 0);
   PRED("ros_action_take_status", 2, ros_action_take_status, 0);
   PRED("ros_action_notify_goal_done", 1, ros_action_notify_goal_done, 0);
+  PRED("ros_action_accept_new_goal", 4, ros_action_accept_new_goal, 0);
+  PRED("ros_action_update_goal_state", 2, ros_action_update_goal_state, 0);
+  PRED("ros_action_expire_goals", 3, ros_action_expire_goals, 0);
 
   PRED("set_action_cancel_type",     1, set_action_cancel_type,     0);
   PRED("set_goal_status_type",     1, set_goal_status_type,     0);

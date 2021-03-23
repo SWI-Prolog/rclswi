@@ -59,6 +59,7 @@ fib(N) :-
     ros_action_run('/fibonacci', _{order:N}, echo, []).
 
 rotate(To) :-
+    debug(ros(_)),
     with_tty_raw(ros_action_run('/turtle1/rotate_absolute', _{theta:To}, echo, [])).
 
 echo -->
@@ -66,6 +67,13 @@ echo -->
     { poll_char(q),
       !,
       format('Typed Q.  Cancelling ...~n'),
+      fail
+    }.
+echo -->
+    [feedback(_{remaining:Remaining})],
+    { Remaining =:= 4,
+      !,
+      format('Found 4.  Cancelling ...~n'),
       fail
     }.
 echo -->
@@ -124,52 +132,83 @@ server :-
                       'turtlesim/action/RotateAbsolute',
                       Server,
                       [ clock(Clock) ]),
-    server_loop(Server).
+    server_loop(Server, []).
 
-server_loop(Server) :-
+server_loop(Server, Goals) :-
     ros_wait([Server], infinite, Ready),
     Ready = [action_server(Server, Goal, Cancel, Result, Expired)],
-    server_action(Server, Goal, Cancel, Result, Expired),
-    server_loop(Server).
+    server_action(Server, Goal, Cancel, Result, Expired, Goals, NewGoals),
+    server_loop(Server, NewGoals).
 
-server_action(Server, Goal, Cancel, Result, Expired) :-
-    server_action(Goal, Server, goal),
-    server_action(Cancel, Server, cancel),
-    server_action(Result, Server, result),
-    server_action(Expired, Server, expired).
+server_action(Server, Goal, Cancel, Result, Expired, Goals0, Goals) :-
+    server_action(Goal, Server, goal, Goals0, Goals1),
+    server_action(Cancel, Server, cancel, Goals1, Goals2),
+    server_action(Result, Server, result, Goals2, Goals3),
+    server_action(Expired, Server, expired, Goals3, Goals).
 
-server_action(true, Server, Type) :-
-    catch(server_action(Type, Server),
+server_action(true, Server, Type, Goals0, Goals) :-
+    catch(server_action1(Type, Server, Goals0, Goals),
           E,
           print_message(warning, E)).
-server_action(false, _, _).
+server_action(false, _, _, Goals, Goals).
 
-server_action(goal, Server) :-
+server_action1(goal, Server, Goals, [Handle|Goals]) :-
     ros:ros_action_take_goal_request(Server, Request, Info),
     debug(ros(action), 'Got goal request ~p, info ~p', [Request, Info]),
     get_time(Now),
+    GoalID = Request.goal_id,
+    ros:ros_action_accept_new_goal(Server, GoalID, Now, Handle),
     ros:ros_action_send_goal_response(Server, _{accepted:true, stamp:Now}, Info),
-    run_goal(Request.goal, Server, Request.goal_id).
-server_action(cancel, Server) :-
+    run_goal(Request.goal, Server, GoalID, Handle).
+server_action1(cancel, Server, Goals, Goals) :-
     ros:ros_action_take_cancel_request(Server, Request, Info),
-    debug(ros(action), 'Got cancel request ~p, info ~p', [Request, Info]).
-server_action(result, Server) :-
+    debug(ros(action), 'Got cancel request ~p, info ~p', [Request, Info]),
+    cancel_goals(Goals, Request.goal_info, Info).
+server_action1(result, Server, Goals, Goals) :-
     ros:ros_action_take_result_request(Server, Request, Info),
-    debug(ros(action), 'Got result request ~p, info ~p', [Request, Info]).
-server_action(expired, Server) :-
+    debug(ros(action), 'Got result request ~p, info ~p', [Request, Info]),
+    ros:ros_action_send_result_response(Server,
+                                        _{result:_{remaining:42},
+                                          status:4}, Info).
+server_action1(expired, Server, Goals, Goals) :-
     debug(ros(action), 'Got expired event', [Server]).
 
-run_goal(Goal, Server, GoalID) :-
+run_goal(Goal, Server, GoalID, Handle) :-
     Theta = Goal.theta,
-    run(Theta, Server, GoalID).
+    ros:ros_action_update_goal_state(Handle, execute),
+    ros:ros_action_publish_status(Server),
+    run(Theta, Server, GoalID, Handle).
 
-run(Theta, Server, GoalID) :-
+run(Theta, Server, _GoalID, Handle) :-
     Theta =< 0,
-    set_succeeded(Server, GoalID).
-run(Theta, Server, GoalID) :-
+    ros:ros_action_update_goal_state(Handle, succeed),
+    ros:ros_action_publish_status(Server).
+run(Theta, Server, GoalID, Handle) :-
     ros:ros_action_publish_feedback(Server, _{feedback:_{remaining:Theta},
                                               goal_id:GoalID}),
-    Theta2 is Theta - 1,
-    run(Theta2, Server, GoalID).
+    Theta2 is Theta - 0.01,
+    peek_cancel(Server, 0.1, Handle),
+    run(Theta2, Server, GoalID, Handle).
 
 
+cancel_goals([], _, _).
+cancel_goals([H|T], CancelInfo, MsgInfo) :-
+    ros:'$ros_action_goal_prop'(H, goal_info, ThisInfo),
+    (   cancel_matches(ThisInfo, CancelInfo)
+    ->  debug(ros(action), 'Cancelling ~p', [ThisInfo]),
+        ros:ros_action_update_goal_state(H, cancel_goal)
+        % TBD: What to do here?
+    ;   true
+    ),
+    cancel_goals(T, CancelInfo, MsgInfo).
+
+% TBD: include time in the matching
+cancel_matches(ThisInfo, CancelInfo) :-
+    ThisInfo.goal_id == CancelInfo.goal_id.
+
+peek_cancel(Server, Time, Handle) :-
+    (   ros_wait([Server], Time, Ready)
+    ->  Ready = [action_server(Server, Goal, Cancel, Result, Expired)],
+        server_action(Server, Goal, Cancel, Result, Expired, [Handle], _)
+    ;   true                            % timeout
+    ).
