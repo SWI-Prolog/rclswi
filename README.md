@@ -6,7 +6,9 @@ __WARNING__
 >
 >   - The publish/subscribe API
 >   - The logging API.
->   - The low-level services API (client and service).
+>   - The services API (client and service).
+>   - Most of the low-level action API and work on a more high
+>     level API for action clients.
 >
 > We plan to turn this into a full   client. If you want to help, please
 > have a look at the TODO list at the end of this README.
@@ -175,6 +177,10 @@ type introspection.  Missing:
   - [ ] Deal with actions
     - [x] Action time introspection
     - [x] Low level interface for creating an action client or server
+    - [x] Receiving feedback and status
+    - [x] Sending and taking goals and results
+    - [ ] Sending and taking cancel requests it broken
+    - [ ] QoS support
   - [ ] Deal with clocks
     - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
