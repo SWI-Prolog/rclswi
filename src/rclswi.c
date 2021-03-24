@@ -1592,7 +1592,7 @@ ros_action_send_cancel_request(term_t ActionClient, term_t Message, term_t SeqNu
 
   rc = prepare_send_request(&ctx);
   TRY(rcl_action_send_cancel_request(&action_client->action_client,
-				     &ctx.msg, &ctx.seq_number));
+				     ctx.msg, &ctx.seq_number));
   return finish_send_request(&ctx, rc);
 }
 
