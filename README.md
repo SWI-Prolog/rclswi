@@ -152,16 +152,18 @@ type introspection.  Missing:
       (atom/string)?
   - [ ] Object live-time handling, i.e., make nodes depend on objects
         associated with the node handle.
-  - [ ] Parameter tracking
-    - [ ] Allow read/write of parameters
-    - [ ] Maintain a copy of a parameter in Prolog that is automatically updated.
+  - [ ] Parameter handling
+    - [ ] Declare node parameters
+    - [ ] Populate declared parameters from arguments and launch data
+    - [ ] Change parameters and publish on `/parameter_events`
+    - [x] Enumerate, get and set parameters on named nodes
   - [ ] Graph tracking
     - [ ] Query the ROS node graph (partially implemented)
     - [ ] Monitor changes (manage the graph in the Prolog db)
   - [ ] Deal with logging
     - [x] configure and generate ROS log messages
     - [x] Bridge from SWI-Prolog `print_message/2` and `debug/3`
-    - [ ] print_message/2 forwarding should only be to /rosout
+    - [ ] print_message/2 forwarding should only be to `/rosout`
     - [ ] Defaults should depend on whether a session is interactive
   - [ ] Deal with services
     - [x] Low level interface: read/write request/response, wait for
@@ -175,12 +177,14 @@ type introspection.  Missing:
 	- [ ] Read/compute/reply loop using multiple threads
 	- [ ] Callback based
   - [ ] Deal with actions
-    - [x] Action time introspection
+    - [x] Action type introspection
     - [x] Low level interface for creating an action client or server
     - [x] Receiving feedback and status
-    - [x] Sending and taking goals and results
-    - [ ] Sending and taking cancel requests it broken
+    - [x] Access to the goals, results and cancel services
     - [ ] QoS support
+    - [ ] High level action API
+      - [x] DCG based action client
+      - [ ] action server
   - [ ] Deal with clocks
     - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
