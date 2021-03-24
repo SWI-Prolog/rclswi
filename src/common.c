@@ -46,5 +46,18 @@ put_enum(term_t t, enum_decl *decl, int value)
     }
   }
 
+  return PL_put_integer(t, value);
+}
+
+int
+unify_enum(term_t t, enum_decl *decl, int value)
+{ for(; decl->name; decl++)
+  { if ( decl->value == value )
+    { if ( !decl->atom )
+	decl->atom = PL_new_atom(decl->name);
+      return PL_unify_atom(t, decl->atom);
+    }
+  }
+
   return PL_unify_integer(t, value);
 }

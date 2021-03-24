@@ -2227,6 +2227,36 @@ ros_action_goal_prop(term_t GoalHandle, term_t Prop, term_t Value)
   return rc;
 }
 
+		 /*******************************
+		 *	    PARAMETERS		*
+		 *******************************/
+
+static enum_decl enum_parameter_type[] =
+{ EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BOOL,	       bool),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_INTEGER,       integer),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_DOUBLE,	       double),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_STRING,	       string),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BYTE_ARRAY,    byte_array),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BOOL_ARRAY,    bool_array),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_INTEGER_ARRAY, integer_array),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_DOUBLE_ARRAY,  double_array),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_STRING_ARRAY,  string_array),
+  EN_END()
+};
+
+static foreign_t
+ros_enum_param_type(term_t AsInt, term_t AsAtom)
+{ int val;
+
+  if ( PL_get_integer(AsInt, &val) )
+  { return unify_enum(AsAtom, enum_parameter_type, val);
+  } else if ( get_enum(AsAtom, "parameter_type", enum_parameter_type, &val) )
+  { return PL_unify_integer(AsInt, val);
+  }
+
+  return FALSE;
+}
+
 
 
 		 /*******************************
@@ -3899,6 +3929,8 @@ install_librclswi(void)
 
   PRED("set_action_cancel_type",     1, set_action_cancel_type,     0);
   PRED("set_goal_status_type",     1, set_goal_status_type,     0);
+
+  PRED("ros_enum_param_type",	     2, ros_enum_param_type,        0);
 
   PRED("ros_rwm_implementation",     1,	ros_rwm_implementation,	    0);
 

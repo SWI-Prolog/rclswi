@@ -112,6 +112,7 @@ typedef struct enum_decl
 
 int	get_enum(term_t t, const char *domain, enum_decl *decl, int *value);
 int	put_enum(term_t t, enum_decl *decl, int value);
+int	unify_enum(term_t t, enum_decl *decl, int value);
 
 
 		 /*******************************
