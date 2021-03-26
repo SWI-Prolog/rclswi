@@ -13,7 +13,7 @@
    limitations under the License.
 */
 
-:- module(ros_parameters,
+:- module(ros_param_client,
           [ ros_node_parameter/3,        % +Node, -Name
             ros_node_get_parameter/4,    % +Node, +Name, -Value, +Options
             ros_node_get_parameters/3,   % +Node, +Dict, +Options
@@ -23,11 +23,11 @@
             ros_parameter_descriptions/3 % +Node, +Dict, +Options
           ]).
 :- use_module(library(ros/services)).
+:- use_module(library(ros/detail/param)).
 :- use_module(library(debug)).
 :- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(apply)).
-:- use_module(library(error)).
 :- use_module(library(pairs)).
 
 /** <module> Access ROS parameters on other nodes
@@ -189,57 +189,12 @@ value_dict(Value, Dict) :-
     !,
     dict_create(Dict, _, [type=TypeCode, Field=Value]).
 
-%!  value_type(+Value, -Type) is det.
-%
-%   Deduce the parameter type from a given value.
-
-value_type(Value, Type), is_list(Value) =>
-    maplist(value_type1, Value, Types),
-    sort(Types, Unique),
-    (   Unique = [One]
-    ->  array_type(One, Type)
-    ;   Unique = [bool,string]
-    ->  Type = string_array
-    ;   type_error(ros_parameter, Value)
-    ).
-value_type(Value, Type) =>
-    value_type1(Value, Type).
-
-value_type1(Value, Type), integer(Value)           => Type = integer.
-value_type1(Value, Type), atom(Value), bool(Value) => Type = bool.
-value_type1(Value, Type), float(Value)             => Type = double.
-value_type1(Value, Type), string(Value)            => Type = string.
-value_type1(Value, Type), atom(Value)              => Type = string.
-
-bool(true).
-bool(false).
-
-array_type(bool,    bool_array).
-array_type(integer, integer_array).
-array_type(double,  double_array).
-array_type(string,  string_array).
-
 set_param_result(_, Response) :-
     Response.successful == true,
     !.
 set_param_result(Name-Value, Response) :-
     print_message(error,
                   ros(set_parameter(failed, Name, Value, Response.reason))).
-
-%!  type_field(?Type, ?Field)
-%
-%   Map between a parameter type and the   struct member where the value
-%   can be found.
-
-type_field(bool,          bool_value).
-type_field(integer,       integer_value).
-type_field(double,        double_value).
-type_field(string,        string_value).
-type_field(byte_array,    byte_array_value).
-type_field(bool_array,    bool_array_value).
-type_field(integer_array, integer_array_value).
-type_field(double_array,  double_array_value).
-type_field(string_array,  string_array_value).
 
 %!  param_client(+Node, +Which, -Client, +Options)
 %
@@ -252,12 +207,6 @@ param_client(Node, Which, Client, Options) :-
           [SrvName, SrvType]),
     ros_client(SrvName, SrvType, Client, Options).
 
-srv_type(describe_parameters,       'rcl_interfaces/srv/DescribeParameters').
-srv_type(get_parameter_types,       'rcl_interfaces/srv/GetParameterTypes').
-srv_type(get_parameters,            'rcl_interfaces/srv/GetParameters').
-srv_type(list_parameters,           'rcl_interfaces/srv/ListParameters').
-srv_type(set_parameters,            'rcl_interfaces/srv/SetParameters').
-srv_type(set_parameters_atomically, 'rcl_interfaces/srv/SetParametersAtomically').
 
 
 		 /*******************************

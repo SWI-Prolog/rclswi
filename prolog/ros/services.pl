@@ -23,6 +23,7 @@
             ros_service_property/2  % +Service, ?Property
           ]).
 :- use_module(library(ros)).
+:- use_module(library(ros/detail/options)).
 
 :- meta_predicate
     ros_service_spin(+, 2),
@@ -48,9 +49,9 @@
 %       Quality of Service profile.
 
 ros_client(ServiceName, SrvType, Client, Options) :-
-    ros:node(Node, Options),
+    node_from_options(Node, Options),
     ros:ros_srv_type_support(SrvType, TypeSupport),
-    ros:qos_profile(QoSProfile, Options),
+    qos_profile_from_options(QoSProfile, Options),
     ros:'$ros_create_client'(Node, TypeSupport, ServiceName, QoSProfile, Client).
 
 %!  ros_call(+Client, +Request, -Response) is semidet.
@@ -129,9 +130,9 @@ deadline_timeout(deadline(Deadline), TimeOut) :-
 %       Quality of Service profile.
 
 ros_service(ServiceName, SrvType, Service, Options) :-
-    ros:node(Node, Options),
+    node_from_options(Node, Options),
     ros:ros_srv_type_support(SrvType, TypeSupport),
-    ros:qos_profile(QoS, Options),
+    qos_profile_from_options(QoS, Options),
     ros:'$ros_create_service'(Node, TypeSupport, ServiceName, QoS, Service).
 
 %!  ros_service_spin(+Service, :Callback) is det.

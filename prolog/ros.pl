@@ -49,6 +49,7 @@
             ros_identifier_prolog/2,    % ?RosName, ?PrologName
             ros_object/2                % ?Object, ?Type
           ]).
+:- use_module(library(ros/detail/options)).
 :- autoload(library(error),
             [must_be/2, existence_error/2, domain_error/2, instantiation_error/1]).
 :- autoload(library(apply), [maplist/2]).
@@ -128,9 +129,9 @@ type_introspection_function_prefix(
 
 ros_subscribe(Topic, CallBack, Options) :-
     message_type(Topic, MsgType, Options),
-    node(Node, Options),
+    node_from_options(Node, Options),
     ros_msg_type_support(MsgType, TypeSupport),
-    qos_profile(QoSProfile, Options),
+    qos_profile_from_options(QoSProfile, Options),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription),
     register_waitable(subscription(Topic), Node, Subscription, CallBack).
 
@@ -142,18 +143,6 @@ message_type(Topic, MsgType, _Options) :-
     !.
 message_type(Topic, _, _) :-
     existence_error(topic, Topic).
-
-node(Node, Options) :-
-    option(node(Node), Options),
-    !.
-node(Node, _) :-
-    ros_default_node(Node).
-
-qos_profile(QoSProfile, Options) :-
-    (   option(qos(NameOrDict), Options)
-    ->  ros_qos_object(NameOrDict, QoSProfile)
-    ;   true
-    ).
 
 %!  ros_unsubscribe(+Topic) is semidet.
 %
@@ -183,9 +172,9 @@ ros_publish(Topic, Message) :-
 
 ros_publisher(Topic, Options) :-
     message_type(Topic, MsgType, Options),
-    node(Node, Options),
+    node_from_options(Node, Options),
     ros_msg_type_support(MsgType, TypeSupport),
-    qos_profile(QoSProfile, Options),
+    qos_profile_from_options(QoSProfile, Options),
     '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
     assert(node_object(subscription(Topic), Node, Subscription)).
 
@@ -469,7 +458,7 @@ ros_ok :-
 %
 %   Creae a ROS node in Context.  Options processed:
 %
-%     - argv(+Arguments)
+%     - ros_args(+Arguments)
 %       Arguments used to initialize the node.  Default come from the
 %       global initialization arguments passed to ros_init/3.
 %     - rosout(+Boolean)
@@ -483,6 +472,8 @@ ros_ok :-
 %
 %     - name(Name)
 %     - namespace(Namespace)
+%     - qname(Name)
+%       Fully qualified name (namespace + name)
 %     - logger_name(LoggerName)
 %       Name of the default logger for this node. See
 %       library(ros/logging) for details.
@@ -494,6 +485,10 @@ ros_property_node(name(Name), Node) :-
     '$ros_node_prop'(Node, name, Name).
 ros_property_node(namespace(Name), Node) :-
     '$ros_node_prop'(Node, namespace, Name).
+ros_property_node(qname(QName), Node) :-
+    '$ros_node_prop'(Node, name, Name),
+    '$ros_node_prop'(Node, namespace, NameSpace),
+    format(atom(QName), '~w~w', [NameSpace, Name]).
 ros_property_node(logger_name(Name), Node) :-
     '$ros_node_prop'(Node, logger_name, Name).
 

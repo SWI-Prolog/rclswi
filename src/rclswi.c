@@ -68,40 +68,44 @@ static int	fill_uuid(term_t t, void *msg);
 static int	fill_time_stamp(term_t Stamp, builtin_interfaces__msg__Time *tp, int ex);
 static int	get_timeout_nsec(term_t Timeout, int64_t *tmo);
 
-static atom_t ATOM_argv;
-static atom_t ATOM_inf;
-static atom_t ATOM_infinite;
-static atom_t ATOM_name;
-static atom_t ATOM_namespace;
-static atom_t ATOM_logger_name;
-static atom_t ATOM_rosout;
-static atom_t ATOM_service;
-static atom_t ATOM_request;
-static atom_t ATOM_response;
-static atom_t ATOM_service_info;
-static atom_t ATOM_request_id;
-static atom_t ATOM_source_timestamp;
-static atom_t ATOM_received_timestamp;
-static atom_t ATOM_writer_guid;
-static atom_t ATOM_sequence_number;
-static atom_t ATOM_node;
+static atom_t ATOM_action;
+static atom_t ATOM_ros_args;
+static atom_t ATOM_clock;
+static atom_t ATOM_context;
+static atom_t ATOM_feedback;
+static atom_t ATOM_global;
 static atom_t ATOM_goal;
+static atom_t ATOM_goal_id;
+static atom_t ATOM_goal_info;
 static atom_t ATOM_goal_request;
 static atom_t ATOM_goal_response;
+static atom_t ATOM_inf;
+static atom_t ATOM_infinite;
+static atom_t ATOM_local;
+static atom_t ATOM_logger_name;
+static atom_t ATOM_name;
+static atom_t ATOM_namespace;
+static atom_t ATOM_node;
+static atom_t ATOM_node_parameters;
+static atom_t ATOM_parameters;
+static atom_t ATOM_received_timestamp;
+static atom_t ATOM_request;
+static atom_t ATOM_request_id;
+static atom_t ATOM_response;
 static atom_t ATOM_result;
 static atom_t ATOM_result_request;
 static atom_t ATOM_result_response;
-static atom_t ATOM_feedback;
-static atom_t ATOM_action;
 static atom_t ATOM_ros;
-static atom_t ATOM_system;
-static atom_t ATOM_steady;
-static atom_t ATOM_clock;
-static atom_t ATOM_context;
-static atom_t ATOM_type;
-static atom_t ATOM_goal_id;
+static atom_t ATOM_rosout;
+static atom_t ATOM_sequence_number;
+static atom_t ATOM_service;
+static atom_t ATOM_service_info;
+static atom_t ATOM_source_timestamp;
 static atom_t ATOM_stamp;
-static atom_t ATOM_goal_info;
+static atom_t ATOM_steady;
+static atom_t ATOM_system;
+static atom_t ATOM_type;
+static atom_t ATOM_writer_guid;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -438,11 +442,12 @@ rclswi_get_arglist(term_t list,
 
   if ( PL_skip_list(list, 0, &len) != PL_LIST )
     return PL_type_error("list", list);
+  len++;				/* for --ros-args */
 
   *num_args = len;
   *arg_values = NULL;
 
-  if ( len > 0 )
+  if ( len > 1 )
   { term_t tail = PL_copy_term_ref(list);
     term_t head = PL_new_term_ref();
     char **argp;
@@ -450,6 +455,7 @@ rclswi_get_arglist(term_t list,
     if ( !(*arg_values = rcl_alloc(sizeof(*arg_values)*len, allocator)) )
       return FALSE;
     argp = *arg_values;
+    *argp++ = rcutils_strdup("--ros-args", *allocator);
 
     for( ; PL_get_list_ex(tail, head, tail); argp++)
     { char *s;
@@ -533,7 +539,7 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
     if ( PL_get_name_arity(head, &name, &arity) && arity == 1)
     { _PL_get_arg(1, head, arg);
 
-      if ( name == ATOM_argv )
+      if ( name == ATOM_ros_args )
       { if ( !rclswi_parse_args(arg, &arguments) )
 	  OUTFAIL;
 	local_arguments = TRUE;
@@ -548,18 +554,26 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
   if ( !PL_get_nil_ex(tail) )
     return FALSE;
 
-  if ( !(node=malloc(sizeof(*node))) )
-    return PL_resource_error("memory");
-  *node = rcl_get_zero_initialized_node();
-  options.use_global_arguments = use_global_arguments;
-  options.arguments = arguments;
-  options.enable_rosout = enable_rosout;
+  if ( rc && !local_arguments )
+  { const char *av[] = {NULL};
+    TRY(rcl_parse_arguments(0, av, rclswi_default_allocator,  &arguments));
+  }
+
+  if ( rc )
+  { if ( !(node=malloc(sizeof(*node))) )
+    { rc=PL_resource_error("memory");
+      OUTFAIL;
+    }
+    *node = rcl_get_zero_initialized_node();
+    options.use_global_arguments = use_global_arguments;
+    options.arguments = arguments;
+    options.enable_rosout = enable_rosout;
+  }
 
   TRY(rcl_node_init(node, node_name, namespace, context, &options));
 
 out:
-  if ( local_arguments )
-    TRY_ANYWAY(rcl_arguments_fini(&arguments));
+  TRY_ANYWAY(rcl_arguments_fini(&arguments));
 
   if ( rc )
     return unify_pointer(Node, node, &node_type);
@@ -2231,6 +2245,169 @@ ros_action_goal_prop(term_t GoalHandle, term_t Prop, term_t Value)
 		 *	    PARAMETERS		*
 		 *******************************/
 
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Delivers:
+
+ - list of _{node:Name, params:Params}
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+#define PUT_VARIANT_ARRAY(type, put) \
+	do								   \
+	{ term_t tmp;							   \
+	  if ( (tmp=PL_new_term_ref()) && PL_put_nil(t) )                  \
+	  { for(ssize_t i=variant->type ## _array_value->size; --i >= 0; ) \
+	    { if ( !put(tmp, variant->type ## _array_value->values[i]) ||  \
+		   !PL_cons_list(t, tmp, t) )				   \
+		return FALSE;						   \
+	    }                                                              \
+	    return TRUE;                                                   \
+	  }								   \
+	  return FALSE;                                                    \
+	} while(0)
+
+
+static int
+put_utf8_string(term_t t, const char *str)
+{ return PL_put_chars(t, PL_ATOM|REP_UTF8, (size_t)-1, str);
+}
+
+static int
+put_param_value(term_t t, const rcl_variant_t *variant)
+{ if ( variant->bool_value )
+  { return PL_put_bool(t, *variant->bool_value);
+  } else if ( variant->integer_value )
+  { return PL_put_int64(t, *variant->integer_value);
+  } else if ( variant->double_value )
+  { return PL_put_float(t, *variant->double_value);
+  } else if ( variant->string_value )
+  { return put_utf8_string(t, variant->string_value);
+  } else if ( variant->byte_array_value )
+  { PUT_VARIANT_ARRAY(byte, PL_put_integer);
+  } else if ( variant->bool_array_value )
+  { PUT_VARIANT_ARRAY(bool, PL_put_bool);
+  } else if ( variant->integer_array_value )
+  { PUT_VARIANT_ARRAY(integer, PL_put_int64);
+  } else if ( variant->double_array_value )
+  { PUT_VARIANT_ARRAY(double, PL_put_float);
+  } else if ( variant->string_array_value )
+  {
+#define values data			/* different struct layout */
+    PUT_VARIANT_ARRAY(string, put_utf8_string);
+#undef values
+  }
+
+  assert(0);
+  return FALSE;
+}
+
+
+static int
+put_params(term_t Params, const rcl_node_params_t *params)
+{ atom_t *keys;
+  size_t i = 0;
+  term_t values;
+  int rc = TRUE;
+
+  if ( !(keys=malloc(params->num_params*sizeof(*keys))) )
+    return PL_resource_error("memory");
+  if ( !(values = PL_new_term_refs(params->num_params)) )
+    return FALSE;
+
+  for(; i < params->num_params; i++)
+  { if ( !(keys[i] = PL_new_atom_mbchars(REP_UTF8, (size_t)-1,
+					 params->parameter_names[i])) ||
+	 !put_param_value(values+i, params->parameter_values) )
+      OUTFAIL;
+  }
+  rc = PL_put_dict(Params, ATOM_parameters, params->num_params, keys, values);
+
+out:
+  if ( keys )
+  { for(size_t j=0; j < i; j++)
+      PL_unregister_atom(keys[j]);
+    free(keys);
+  }
+
+  return rc;
+}
+
+
+
+static int
+node_parameters_from_rcl_params(term_t ParamsByNode,
+				const rcl_params_t *params)
+{ term_t Node;
+
+  if ( !(Node=PL_new_term_ref()) )
+    return FALSE;
+
+  PL_put_nil(ParamsByNode);
+  for(ssize_t i = params->num_nodes; --i >= 0; )
+  { atom_t keys[] = { ATOM_node, ATOM_parameters };
+    term_t values = PL_new_term_refs(2);
+
+    if ( !(values = PL_new_term_refs(2)) ||
+	 !put_utf8_string(values+0, params->node_names[i]) ||
+	 !put_params(values+1, &params->params[i]) ||
+	 !PL_put_dict(Node, ATOM_node_parameters, 2, keys, values) ||
+	 !PL_cons_list(ParamsByNode, Node, ParamsByNode) )
+      return FALSE;
+
+    PL_reset_term_refs(values);
+  }
+
+  return TRUE;
+}
+
+
+static int
+parse_param_overrides(term_t Params, const rcl_arguments_t *args)
+{ rcl_params_t *params = NULL;
+  int rc = TRUE;
+
+  TRY(rcl_arguments_get_param_overrides(args, &params));
+  if ( rc )
+  { if ( params )
+      rc = node_parameters_from_rcl_params(Params, params);
+    else
+      rc = PL_put_nil(Params);
+  }
+
+  if ( params )
+    rcl_yaml_node_struct_fini(params);
+
+  return rc;
+}
+
+
+static foreign_t
+ros_get_node_parameters(term_t Node, term_t Which, term_t Params)
+{ rcl_node_t *node;
+  int rc = TRUE;
+  atom_t which;
+  term_t Tmp = PL_new_term_ref();
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) ||
+       !PL_get_atom_ex(Which, &which) )
+    return FALSE;
+
+  const rcl_node_options_t *node_options = rcl_node_get_options(node);
+
+  if ( which == ATOM_global )
+  { if ( node_options->use_global_arguments )
+      rc = parse_param_overrides(Tmp, &node->context->global_arguments);
+    else
+      rc = PL_put_nil(Tmp);
+  } else if ( which == ATOM_local )
+  { rc = parse_param_overrides(Tmp, &node_options->arguments);
+  } else
+    return PL_domain_error("ros_parameter_scope", Which);
+
+  return rc && PL_unify(Params, Tmp);
+}
+
+
 static enum_decl enum_parameter_type[] =
 { EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BOOL,	       bool),
   EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_INTEGER,       integer),
@@ -3828,40 +4005,44 @@ install_librclswi(void)
   MKFUNCTOR(action_server, 5);
   FUNCTOR_minus2 = PL_new_functor(PL_new_atom("-"), 2);
 
-  MKATOM(argv);
-  MKATOM(inf);
-  MKATOM(infinite);
-  MKATOM(name);
-  MKATOM(namespace);
-  MKATOM(logger_name);
-  MKATOM(rosout);
-  MKATOM(service);
-  MKATOM(request);
-  MKATOM(response);
-  MKATOM(service_info);
-  MKATOM(request_id);
-  MKATOM(source_timestamp);
-  MKATOM(received_timestamp);
-  MKATOM(writer_guid);
-  MKATOM(sequence_number);
-  MKATOM(node);
+  MKATOM(action);
+  MKATOM(ros_args);
+  MKATOM(clock);
+  MKATOM(context);
+  MKATOM(feedback);
+  MKATOM(global);
   MKATOM(goal);
+  MKATOM(goal_id);
+  MKATOM(goal_info);
   MKATOM(goal_request);
   MKATOM(goal_response);
+  MKATOM(inf);
+  MKATOM(infinite);
+  MKATOM(local);
+  MKATOM(logger_name);
+  MKATOM(name);
+  MKATOM(namespace);
+  MKATOM(node);
+  MKATOM(node_parameters);
+  MKATOM(parameters);
+  MKATOM(received_timestamp);
+  MKATOM(request);
+  MKATOM(request_id);
+  MKATOM(response);
   MKATOM(result);
   MKATOM(result_request);
   MKATOM(result_response);
-  MKATOM(feedback);
-  MKATOM(action);
   MKATOM(ros);
-  MKATOM(system);
-  MKATOM(steady);
-  MKATOM(clock);
-  MKATOM(context);
-  MKATOM(type);
-  MKATOM(goal_id);
+  MKATOM(rosout);
+  MKATOM(sequence_number);
+  MKATOM(service);
+  MKATOM(service_info);
+  MKATOM(source_timestamp);
   MKATOM(stamp);
-  MKATOM(goal_info);
+  MKATOM(steady);
+  MKATOM(system);
+  MKATOM(type);
+  MKATOM(writer_guid);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 #define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
@@ -3931,6 +4112,7 @@ install_librclswi(void)
   PRED("set_goal_status_type",     1, set_goal_status_type,     0);
 
   PRED("ros_enum_param_type",	     2, ros_enum_param_type,        0);
+  PRED("ros_get_node_parameters",    3, ros_get_node_parameters,    0);
 
   PRED("ros_rwm_implementation",     1,	ros_rwm_implementation,	    0);
 

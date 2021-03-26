@@ -81,5 +81,13 @@ install(FILES prolog/ros/logging.pl
 	      prolog/ros/qos.pl
   DESTINATION prolog/ros
 )
+install(FILES prolog/ros/param/client.pl
+	      prolog/ros/param/store.pl
+  DESTINATION prolog/ros/param
+)
+install(FILES prolog/ros/detail/options.pl
+	      prolog/ros/detail/param.pl
+  DESTINATION prolog/ros/detail
+)
 
 ament_package()
