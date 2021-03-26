@@ -2,11 +2,12 @@
 
 __WARNING__
 
-> This is not (yet) a useful ROS2 client. Currently it only handles
+> This is work in progress. Currently it handles
 >
 >   - The publish/subscribe API
 >   - The logging API.
 >   - The services API (client and service).
+>   - A large part of the parameter API
 >   - Most of the low-level action API and work on a more high
 >     level API for action clients.
 >
@@ -153,9 +154,11 @@ type introspection.  Missing:
   - [ ] Object live-time handling, i.e., make nodes depend on objects
         associated with the node handle.
   - [ ] Parameter handling
-    - [ ] Declare node parameters
-    - [ ] Populate declared parameters from arguments and launch data
-    - [ ] Change parameters and publish on `/parameter_events`
+    - [x] Declare node parameters
+    - [x] Populate declared parameters from arguments and launch data
+    - [x] Change parameters
+    - [ ] Publish changes on `/parameter_events`
+    - [ ] Provide a callback on parameter changes
     - [x] Enumerate, get and set parameters on named nodes
   - [ ] Graph tracking
     - [ ] Query the ROS node graph (partially implemented)
