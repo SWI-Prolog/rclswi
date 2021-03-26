@@ -121,12 +121,7 @@ ros_node_get_parameters(Node, Dict, Options) :-
     param_client(Node, get_parameters, Client, Options),
     Request = _{names:Keys},
     ros_call(Client, Request, Response, Options),
-    maplist(param_value, Response.values, Values).
-
-param_value(Dict, Value) :-
-    ros:ros_enum_param_type(Dict.type, Type),
-    type_field(Type, Field),
-    get_dict(Field, Dict, Value).
+    maplist(variant_value, Response.values, Values).
 
 %!  ros_node_set_parameter(+Node:atom, +Name, +Value, +Options) is det.
 %!  ros_node_set_parameters(+Node:atom, +Dict, +Options) is det.
@@ -203,7 +198,7 @@ set_param_result(Name-Value, Response) :-
 param_client(Node, Which, Client, Options) :-
     atomic_list_concat([Node, Which], /, SrvName),
     srv_type(Which, SrvType),
-    debug(ros(parameters), 'Createing client for ~p, type ~p',
+    debug(ros(parameters), 'Creating client for ~p, type ~p',
           [SrvName, SrvType]),
     ros_client(SrvName, SrvType, Client, Options).
 

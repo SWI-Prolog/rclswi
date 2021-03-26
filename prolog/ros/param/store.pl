@@ -19,7 +19,8 @@
             ros_get_param/3,             % ?Name, -Value, +Options
             ros_set_param/2,             % ?Name,-Value
             ros_set_param/3,             % ?Name, -Value, +Options
-            import_parameters/1          % +Options
+            import_parameters/1,         % +Options
+            ros_parameter_property/3     % +Node, ?Param, ?Property
           ]).
 :- use_module(library(ros)).
 :- use_module(library(ros/detail/options)).
@@ -118,6 +119,34 @@ cast_to(string, Value0, Value) =>
 cast_to(bool, Value0, Value) =>
     must_be(bool, Value0),
     Value = Value0.
+
+%!  ros_parameter_property(+Node, ?Param, ?Property) is nondet.
+%
+%   True when Property is a property of   Param on Node. Every parameter
+%   has a property exists(true). Other defined  properties are below. We
+%   refer to ros_parameter/2 for details.
+%
+%     - default(Value)
+%     - type(Type)
+%     - additional_constraints(String)
+%     - description(Text)
+%     - read_only(Bool)
+%
+%   This predicate is semidet if Param and the Property are nonvar.
+
+ros_parameter_property(Node, Param, Property) :-
+    node_id(Node, NodeID),
+    (   compound(Property),
+        Property =.. [Prop,Value]
+    ->  (   atom(Param)
+        ->  node_param_property(NodeID, Param, Prop, Value),
+            !
+        ;   node_param_property(NodeID, Param, Prop, Value)
+        )
+    ;   node_param_property(NodeID, Param, Prop, Value),
+        Property =.. [Prop,Value]
+    ).
+
 
 %!  ros_delete_param(+Node, +Name) is det.
 %

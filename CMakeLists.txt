@@ -82,6 +82,7 @@ install(FILES prolog/ros/logging.pl
   DESTINATION prolog/ros
 )
 install(FILES prolog/ros/param/client.pl
+	      prolog/ros/param/services.pl
 	      prolog/ros/param/store.pl
   DESTINATION prolog/ros/param
 )

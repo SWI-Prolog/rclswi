@@ -2409,7 +2409,8 @@ ros_get_node_parameters(term_t Node, term_t Which, term_t Params)
 
 
 static enum_decl enum_parameter_type[] =
-{ EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BOOL,	       bool),
+{ EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_NOT_SET,       not_set),
+  EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_BOOL,	       bool),
   EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_INTEGER,       integer),
   EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_DOUBLE,	       double),
   EN_DECL(rcl_interfaces__msg__ParameterType__PARAMETER_STRING,	       string),

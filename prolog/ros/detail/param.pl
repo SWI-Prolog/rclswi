@@ -14,7 +14,8 @@
 */
 
 :- module(ros_param_detail_common,
-          [ value_type/2,               % +Value, -Type
+          [ variant_value/2,            % +Dict, -Value
+            value_type/2,               % +Value, -Type
             type_field/2,               % ?Type, ?Field
             srv_type/2,                 % ?ParamService, ?Type
             is_valid_param_type/1,	% @Type
@@ -28,6 +29,16 @@
 This library provides common  functionality   to  the  various parameter
 related modules.
 */
+
+%!  variant_value(+Dict, +Value) is det.
+%
+%   Get the Prolog value   from  a ``rcl_interfaces/msg/ParameterValue``
+%   term.
+
+variant_value(Dict, Value) :-
+    ros:ros_enum_param_type(Dict.type, Type),
+    type_field(Type, Field),
+    get_dict(Field, Dict, Value).
 
 %!  value_type(+Value, -Type) is det.
 %

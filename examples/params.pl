@@ -3,10 +3,12 @@
 
 :- module(params,
           [ dump_params/0,
-            import_params/0
+            import_params/0,
+            start_services/0
           ]).
 :- reexport(library(ros)).
 :- reexport(library(ros/param/client)).
+:- reexport(library(ros/param/services)).
 :- reexport(library(ros/param/store)).
 
 /** <module> Parameter handling demos
@@ -55,3 +57,9 @@ import_params :-
     import_parameters([]),
     forall(ros_get_param(Name, Value),
            format('~p = ~p~n', [Name, Value])).
+
+%!  start_services
+
+start_services :-
+    ros_param_services([]),
+    thread_create(ros_spin, _, [detached(true)]).
