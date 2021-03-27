@@ -18,6 +18,7 @@
           ]).
 :- use_module(library(ros)).
 :- use_module(library(ros/services)).
+:- use_module(library(ros/param/store)).
 :- use_module(library(ros/detail/param)).
 :- use_module(library(ros/detail/options)).
 :- use_module(library(debug)).
@@ -178,7 +179,8 @@ to_failure(Failure, Failure).
 %   the changes are atomically.
 
 set_parameters(Node, _{parameters:Params}, _{results:Results}) :-
-    transaction(maplist(set_parameter(Node), Params, Results)).
+    transaction(maplist(set_parameter(Node), Params, Results)),
+    ros_publish_parameter_events(Node).
 
 set_parameter(Node, _{name:String, value:Variant}, Result) :-
     atom_string(Param, String),
@@ -190,4 +192,5 @@ set_parameter(Node, _{name:String, value:Variant}, Result) :-
             Result = _{successful:false, reason:Message}
         )
     ;   Result = _{successful:false, reason:"Unknown failure"}
-    ).
+    ),
+    ros_publish_parameter_events(Node).

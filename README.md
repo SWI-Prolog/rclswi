@@ -7,7 +7,7 @@ __WARNING__
 >   - The publish/subscribe API
 >   - The logging API.
 >   - The services API (client and service).
->   - A large part of the parameter API
+>   - The parameter API (declare, get/set, publish and services)
 >   - Most of the low-level action API and work on a more high
 >     level API for action clients.
 >
@@ -153,12 +153,12 @@ type introspection.  Missing:
       (atom/string)?
   - [ ] Object live-time handling, i.e., make nodes depend on objects
         associated with the node handle.
-  - [ ] Parameter handling
+  - [x] Parameter handling
     - [x] Declare node parameters
     - [x] Populate declared parameters from arguments and launch data
     - [x] Change parameters
-    - [ ] Publish changes on `/parameter_events`
-    - [ ] Provide a callback on parameter changes
+    - [x] Publish changes on `/parameter_events`
+    - [x] Provide a callback on parameter changes
     - [x] Enumerate, get and set parameters on named nodes
   - [ ] Graph tracking
     - [ ] Query the ROS node graph (partially implemented)

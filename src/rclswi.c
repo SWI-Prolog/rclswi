@@ -4055,7 +4055,7 @@ install_librclswi(void)
   PRED("ros_init",		     3,	ros_init,		    0);
   PRED("$ros_shutdown",		     1,	ros_shutdown,		    0);
   PRED("ros_ok",		     1,	ros_ok,			    0);
-  PRED("ros_create_node",	     4,	ros_create_node,	    0);
+  PRED("$ros_create_node",	     4,	ros_create_node,	    0);
   PRED("ros_node_fini",		     1,	ros_node_fini,		    0);
   PRED("$ros_node_prop",	     3,	ros_node_prop,		    0);
   PRED("$ros_publisher",	     5,	ros_publisher,		    0);

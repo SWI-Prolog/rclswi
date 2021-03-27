@@ -16,13 +16,14 @@
 :- module(ros,
           [ ros_set_defaults/1,         % +List
             ros_spin/0,
-            ros_spin/1,                 % +Node
+            ros_spin/1,                 % +Options
             ros_shutdown/0,
 
             ros_subscribe/3,            % +Topic, :CallBack, +Options
             ros_unsubscribe/1,          % +Topic
 
             ros_publish/2,              % +Topic, +Message
+            ros_publish/3,              % +Topic, +Message, +Options
             ros_publisher/2,            % +Topic, +Options
 
             ros_current_topic/2,        % ?Topic,?Type
@@ -30,8 +31,8 @@
 
             ros_create_context/1,       % -Context
             ros_init/3,                 % +Context, +Args, ?DomainID
-            ros_create_node/4,          % +Context, +Name, -Node, +Options
-            ros_node_property/2,        % +Node,?Property
+            ros_create_node/3,          % +Name, -Node, +Options
+            ros_node_property/2,        % +Node, ?Property
 
             ros_publisher/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Publisher
             ros_subscribe/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Subscription
@@ -45,24 +46,34 @@
             ros_debug/1,                % +Level
             ros_default_context/1,      % -Context
             ros_default_node/1,         % -Node
+            ros_node/2,                 % +Alias, -Node
 
             ros_identifier_prolog/2,    % ?RosName, ?PrologName
-            ros_object/2                % ?Object, ?Type
+            ros_object/2,               % ?Object, ?Type
+            ros_synchronized/2          % +Object, :Goal
           ]).
-:- use_module(library(ros/detail/options)).
 :- autoload(library(error),
-            [must_be/2, existence_error/2, domain_error/2, instantiation_error/1]).
+            [ must_be/2,
+              existence_error/2,
+              domain_error/2,
+              instantiation_error/1,
+              type_error/2,
+              permission_error/3
+            ]).
 :- autoload(library(apply), [maplist/2]).
 :- autoload(library(lists), [append/3, member/2]).
-:- autoload(library(option), [option/2, option/3]).
+:- autoload(library(option), [option/2, select_option/3, option/3]).
 :- autoload(library(prolog_code), [most_general_goal/2]).
 :- use_module(library(filesex), [directory_file_path/3]).
 :- use_module(library(debug), [debug/3]).
 
-:- autoload(library(ros/qos), [ros_qos_object/2]).
+:- use_module(library(ros/detail/options)).
+:- autoload(library(ros/param/services), [ros_param_services/1]).
+:- autoload(library(ros/param/store), [ros_parameter/2, import_parameters/1]).
 
 :- meta_predicate
-    ros_subscribe(+, 1, +).
+    ros_subscribe(+, 1, +),
+    ros_synchronized(+, 0).
 
 :- dynamic ros_lib_dir/1.
 :- public unique_pred/0.
@@ -155,28 +166,52 @@ ros_unsubscribe(Topic) :-
     '$ros_unsubscribe'(Subscription).
 
 %!  ros_publish(+Topic, +Message) is det.
+%!  ros_publish(+Topic, +Message, +Options) is det.
 %
-%   Send a message to Topic.
+%   Send a message to Topic. If no  publisher exists it it created based
+%   on Options. Other options processed:
+%
+%     - node(+Node)
+%       Specify the node.  When omitted the first node for which
+%       a publisher on Topic was registered is used.
 
 ros_publish(Topic, Message) :-
-    node_object(subscription(Topic), _Node, Subscription),
-    !,
-    '$ros_publish'(Subscription, Message).
-ros_publish(Topic, Message) :-
-    ros_publisher(Topic, []),
-    node_object(subscription(Topic), _Node, Subscription),
+    ros_publish(Topic, Message, []).
+
+ros_publish(Topic, Message, Options) :-
+    node_from_options(Node, Options),
+    (   node_object(subscription(Topic), Node, Subscription)
+    ->  true
+    ;   ros_synchronized(Node,
+                         ros_publisher_(Node, Topic, Subscription, Options))
+    ),
     '$ros_publish'(Subscription, Message).
 
 
 %!  ros_publisher(+Topic, +Options) is det.
+%
+%   Register a publisher for Topic. This is  a no-op if Topic is already
+%   registered. Options:
+%
+%     - node(+Node)
+%       Node to use.  Defaults to ros_default_node/1.
+%     - message_type(+Type)
+%       Message type.  When omitted ros_current_topic/2 is used to try
+%       and infer the type.
 
 ros_publisher(Topic, Options) :-
-    message_type(Topic, MsgType, Options),
     node_from_options(Node, Options),
-    ros_msg_type_support(MsgType, TypeSupport),
-    qos_profile_from_options(QoSProfile, Options),
-    '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
-    assert(node_object(subscription(Topic), Node, Subscription)).
+    ros_synchronized(Node, ros_publisher_(Node, Topic, _, Options)).
+
+ros_publisher_(Node, Topic, Subscription, Options) :-
+    (   node_object(subscription(Topic), Node, Subscription)
+    ->  true
+    ;   message_type(Topic, MsgType, Options),
+        ros_msg_type_support(MsgType, TypeSupport),
+        qos_profile_from_options(QoSProfile, Options),
+        '$ros_publisher'(Node, TypeSupport, Topic, QoSProfile, Subscription),
+        assert(node_object(subscription(Topic), Node, Subscription))
+    ).
 
 %!  register_waitable(+Type, +Node, +Object, +Callback) is det.
 %
@@ -187,29 +222,33 @@ register_waitable(Type, Node, Object, Callback) :-
     assert(waitable(Type, Node, Object, Callback)).
 
 %!  ros_spin is det.
-%!  ros_spin(+Node) is det.
+%!  ros_spin(+Options) is det.
 %
-%   Wait for all waitable objects  registered   with  Node  and call the
+%   Wait for all waitable objects registered with   a  node and call the
 %   callbacks associated with the ready  objects.   If  no callbacks are
-%   registered this call waits for new  registrations. Two use cases are
-%   envisioned:
+%   registered this call waits for new  registrations.  Options:
 %
-%     - Use a single thread that registers waitable objects
-%       (subscriptions, timers, services, etc.) and then calls
-%       ros_spin/0,1 to wait for ready objects and process there
-%       callbacks.
-%     - Start ros_spin/0,1 in a thread and register waitable objects
-%       from different threads, for example, with the call below.
-%       This option is notably practical for interactive usage.
-%
-%           ?- thread_create(ros_spin, _, [alias(ros_spinner)]).
+%     - node(+Node)
+%       The node to use
+%     - thread(TrueOrAlias)
+%       Run the spinner in a thread. If `true`, the thread is anonymous.
 
 ros_spin :-
-    ros_default_node(Node),
-    ros_spin(Node).
+    ros_spin([]).
 
-ros_spin(Node) :-
-    ros_ok,
+ros_spin(Options) :-
+    node_from_options(Node, Options),
+    (   option(thread(TrueAlias), Options)
+    ->  (   TrueAlias == true
+        ->  ThreadOptions = []
+        ;   ThreadOptions = [alias(TrueAlias)]
+        ),
+        thread_create(ros_node_spin(Node), _, ThreadOptions)
+    ;   ros_node_spin(Node)
+    ).
+
+ros_node_spin(Node) :-
+    ros_ok,                             % TBD: wait on this node to be shut down
     !,
     (   ros_spin_once(Node, infinite)
     ->  true
@@ -217,8 +256,8 @@ ros_spin(Node) :-
                     [ wait_preds([waitable/4])
                     ])
     ),
-    ros_spin(Node).
-ros_spin(_).
+    ros_node_spin(Node).
+ros_node_spin(_).
 
 waitables_on(Node) :-
     waitable(_Type, Node, _Obj, _Callback),
@@ -277,12 +316,12 @@ ros_ready(subscription(_), Subscription, CallBack) :-
 %       Set the ROS domain
 %     - node(Name, Options)
 %       Set the name of the default node and the options to create it.
-%       Options are passed to ros_create_node/4.
+%       Options are passed to ros_create_node/3.
 
 :- dynamic
     ros_default/1,                      % Term
     ros_context_store/1,                % Context
-    ros_node_store/2,                   % Node, Context
+    ros_node_store/4,                   % Name, Node, Context, Mutex
     ros_property_store/1.               % Term
 
 ros_set_defaults(List) :-
@@ -354,16 +393,19 @@ ros_default_argv(ROSArgv) :-
 ros_default_argv([]).
 
 
-%!  ros_default_node(-Node)
+%!  ros_default_node(-Node) is det.
 %
 %   Default node to use. The node is  created in the context provided by
 %   ros_default_context/1. The name and arguments to create the node are
 %   provided by ros_set_defaults/1. If  no   defaults  are  provided the
-%   default node name is ``swip-prolog-<number>``, where ``<number>`` is
-%   a large random number.
+%   default node name is   ``swipl-prolog-<number>``, where ``<number>``
+%   is a large random number.
+%
+%   This is the same  as  `ros_node(default,   Node)`,  except  that  is
+%   creates the node if this has not already been done.
 
 ros_default_node(Node) :-
-    ros_node_store(Node0, _),
+    ros_node_store(default, Node0, _, _),
     !,
     Node = Node0.
 ros_default_node(Node) :-
@@ -371,21 +413,113 @@ ros_default_node(Node) :-
     with_mutex(ros, ros_default_node_sync(Node)).
 
 ros_default_node_sync(Node) :-
-    ros_node_store(Node, _),
+    ros_node_store(default, Node, _, _),
     !.
 ros_default_node_sync(Node) :-
-    default_node_name_and_arguments(Name, Args),
-    ros_default_context(Context),
-    ros_create_node(Context, Name, Node, Args),
-    sleep(0.2),                     % TBD: Needed to make the node visible
-    asserta(ros_node_store(Node, Context)).
+    default_node_name_and_arguments(NodeName, Args),
+    ros_create_node(NodeName, Node, [alias(default)|Args]).
 
-default_node_name_and_arguments(Name, Args) :-
-    ros_default(node(Name, Args)),
+default_node_name_and_arguments(NodeName, Args) :-
+    ros_default(node(NodeName, Args)),
     !.
-default_node_name_and_arguments(Name, []) :-
+default_node_name_and_arguments(NodeName, []) :-
     Id is random(1<<63),
-    atom_concat('swi_prolog_', Id, Name).
+    atom_concat('swi_prolog_', Id, NodeName).
+
+%!  ros_node(+Alias, -Node) is det.
+%
+%   Get a ROS node from its alias name.
+%
+%   @see ros_default_node/1.  A node with alias name can be created
+%   using ros_create_node/3 with the option alias(Alias).
+%   @error existence_error(ros_node, Alias)
+
+ros_node(Alias, Node), atom(Alias) =>
+    (   ros_node_store(Alias, Node, _, _)
+    ->  true
+    ;   existence_error(ros_node, Alias)
+    ).
+ros_node(Alias, _) =>
+    type_error(atom, Alias).
+
+%!  ros_create_node(+NodeName, -Node, +Options) is det.
+%
+%   Create a ROS node.  Options processed:
+%
+%     - alias(+Atom)
+%       Alias name that can be used with the node(Node) option of
+%       many predicates.
+%     - ros_args(+Arguments)
+%       Arguments used to initialize the node.  Default come from the
+%       global initialization arguments passed to ros_init/3.
+%     - rosout(+Boolean)
+%       Enable/disable ros logging to ``/rosout``. Default is to have
+%       this enabled.
+%     - parameters(+List)
+%       Specify parameters for this node.  Each parameter is a pair
+%       whose key is the parameter name and whose value is a list of
+%       options passed to ros_parameter/2.
+%     - parameter_services(+Bool)
+%       If true, start the ROS parameter services that provide other
+%       nodes with access to our parameters.  Default is `true` if
+%       parameters(List) is supplied.
+%     - context(+Context)
+%       Context to use.  Default is provided by ros_default_context/1.
+
+ros_create_node(Name, Node, Options) :-
+    select_option(alias(Alias), Options, Options1),
+    !,
+    (   ros_node_store(Alias, _, _, _)
+    ->  permission_error(create, ros_node, Node)
+    ;   true
+    ),
+    ros_create_node(Name, Alias, Node, Options1).
+ros_create_node(Name, Node, Options) :-
+    ros_create_node(Name, Node, Node, Options).
+
+ros_create_node(Name, Alias, Node, Options) :-
+    ros_context_from_options(Context, Options),
+    '$ros_create_node'(Context, Name, Node, Options),
+    sleep(0.2),                     % TBD: Needed to make the node visible
+    mutex_create(Mutex),
+    asserta(ros_node_store(Alias, Node, Context, Mutex)),
+    init_node_parameters(Node, Options).
+
+ros_context_from_options(Context, Options) :-
+    option(context(Context0), Options),
+    !,
+    Context = Context0.
+ros_context_from_options(Context, _) :-
+    ros_default_context(Context).
+
+%!  init_node_parameters(+Node, +Options) is det.
+%
+%   Initialize the node parameters from the options.
+
+init_node_parameters(Node, Options) :-
+    (   option(parameters(Params), Options)
+    ->  StartServiceDefault = true,
+        maplist(add_parameter(Node), Params),
+        import_parameters([node(Node),publish(false)])
+    ;   StartServiceDefault = false
+    ),
+    (   option(parameter_services(true), Options, StartServiceDefault)
+    ->  ros_param_services([node(Node)])
+    ;   true
+    ).
+
+add_parameter(Node, Name-Options) =>
+    ros_parameter(Name, [node(Node),publish(false)|Options]).
+
+%!  ros_synchronized(+Object, :Goal) is semidet.
+%
+%   Run Goal synchronized on the mutex associated with Object. Currently
+%   Object must be a node instance
+
+ros_synchronized(Node, Goal) :-
+    ros_node_store(_, Node, _, Mutex),
+    !,
+    with_mutex(Mutex, Goal).
 
 %!  ros_shutdown is det.
 %!  ros_shutdown(+Context) is det.
@@ -397,7 +531,7 @@ ros_shutdown :-
            ros_shutdown(Context)).
 
 ros_shutdown(Context) :-
-    forall(ros_node_store(Node, Context),
+    forall(ros_node_store(_Name, Node, Context, _),
            ros_shutdown_node(Node)),
     '$ros_logging_shutdown',
     forall(ros_context_store(Context),
@@ -452,18 +586,6 @@ ros_current_topic(Topic, Type) :-
 ros_ok :-
     ros_context_store(Context),
     ros_ok(Context).
-
-
-%!  ros_create_node(+Context, +Name, -Node, +Options)
-%
-%   Creae a ROS node in Context.  Options processed:
-%
-%     - ros_args(+Arguments)
-%       Arguments used to initialize the node.  Default come from the
-%       global initialization arguments passed to ros_init/3.
-%     - rosout(+Boolean)
-%       Enable/disable ros logging to ``/rosout``. Default is to have
-%       this enabled.
 
 %!  ros_node_property(+Node, ?Property) is nondet.
 %

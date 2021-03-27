@@ -18,15 +18,21 @@
             qos_profile_from_options/2  % -QoSProfile, +Options
           ]).
 :- use_module(library(ros)).
+:- autoload(library(ros/qos), [ros_qos_object/2]).
 :- use_module(library(option)).
 
 %!  node_from_opions(-Node, +Options) is det.
 %
-%   Get the ROS node to act from Options.
+%   Get the ROS node to act from Options. The node may be specified as a
+%   node object or node alias name.
 
 node_from_options(Node, Options) :-
-    option(node(Node), Options),
-    !.
+    option(node(NodeOrAlias), Options),
+    !,
+    (   ros_object(NodeOrAlias, ros_node)
+    ->  Node = NodeOrAlias
+    ;   ros_node(NodeOrAlias, Node)
+    ).
 node_from_options(Node, _) :-
     ros:ros_default_node(Node).
 
@@ -36,6 +42,6 @@ node_from_options(Node, _) :-
 
 qos_profile_from_options(QoSProfile, Options) :-
     (   option(qos(NameOrDict), Options)
-    ->  ros:ros_qos_object(NameOrDict, QoSProfile)
+    ->  ros_qos_object(NameOrDict, QoSProfile)
     ;   true
     ).

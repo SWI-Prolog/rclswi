@@ -30,15 +30,39 @@ This library provides common  functionality   to  the  various parameter
 related modules.
 */
 
-%!  variant_value(+Dict, +Value) is det.
+%!  variant_value(?Dict, ?Value) is det.
 %
-%   Get the Prolog value   from  a ``rcl_interfaces/msg/ParameterValue``
-%   term.
+%   Map      between      a       Prolog        value       and       an
+%   ``rcl_interfaces/msg/ParameterValue`` term. When mapping from Prolog
+%   to message, Value can  be  of   the  share  Type(Value),  to resolve
+%   ambiguities. E.g., string(Atom) may be  used   to  ensure  `true` is
+%   passed as a string rather than a boolean.
 
 variant_value(Dict, Value) :-
+    nonvar(Dict),
+    !,
     ros:ros_enum_param_type(Dict.type, Type),
     type_field(Type, Field),
     get_dict(Field, Dict, Value).
+variant_value(Dict, TypedValue) :-
+    compound(TypedValue),
+    compound_name_arguments(TypedValue, Type, [Value]),
+    type_field(Type, Field),
+    ros:ros_enum_param_type(TypeCode, Type),
+    !,
+    dict_create(Dict, _, [type=TypeCode, Field=Value]).
+variant_value(Dict, Value) :-
+    var(Value),
+    !,
+    ros:ros_enum_param_type(TypeCode, not_set),
+    !,
+    dict_create(Dict, _, [type=TypeCode]).
+variant_value(Dict, Value) :-
+    value_type(Value, Type),
+    type_field(Type, Field),
+    ros:ros_enum_param_type(TypeCode, Type),
+    !,
+    dict_create(Dict, _, [type=TypeCode, Field=Value]).
 
 %!  value_type(+Value, -Type) is det.
 %
@@ -100,7 +124,7 @@ typecheck_parameter_value(double(Low, High, Step), Value) =>
     must_be(between(LowF, HighF), Value),
     (   Step =:= 0.0
     ->  true
-    ;   (Value-Low) mod Step =:= 0
+    ;   float_fractional_part((Value-Low) / Step) < Step/1000.0
     ->  true
     ;   domain_error(float(Low, High, Step), Value)
     ).

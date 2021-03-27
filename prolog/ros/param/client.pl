@@ -168,21 +168,8 @@ ros_node_set_parameters(Node, Dict, Options) :-
     maplist(set_param_result, Pairs, Response.results).
 
 set_param(Name-Value, _{name:Name, value:ValueDict}) :-
-    value_dict(Value, ValueDict).
-
-value_dict(TypedValue, Dict) :-
-    compound(TypedValue),
-    compound_name_arguments(TypedValue, Type, [Value]),
-    type_field(Type, Field),
-    ros:ros_enum_param_type(TypeCode, Type),
-    !,
-    dict_create(Dict, _, [type=TypeCode, Field=Value]).
-value_dict(Value, Dict) :-
-    value_type(Value, Type),
-    type_field(Type, Field),
-    ros:ros_enum_param_type(TypeCode, Type),
-    !,
-    dict_create(Dict, _, [type=TypeCode, Field=Value]).
+    must_be(nonvar, Value),
+    variant_value(ValueDict, Value).
 
 set_param_result(_, Response) :-
     Response.successful == true,
