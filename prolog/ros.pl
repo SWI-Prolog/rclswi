@@ -75,6 +75,12 @@
     ros_subscribe(+, 1, +),
     ros_synchronized(+, 0).
 
+:- predicate_options(ros_spin/1, 1,
+                     [ node(any),
+                       thread(atom)
+                     ]).
+
+
 :- dynamic ros_lib_dir/1.
 :- public unique_pred/0.
 

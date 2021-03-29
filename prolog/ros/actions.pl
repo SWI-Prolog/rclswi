@@ -20,6 +20,7 @@
             ros_action_server/4     % +ActionName, +ActionType, -Server, +Options
           ]).
 :- use_module(library(ros)).
+:- use_module(library(ros/detail/options)).
 :- use_module(library(debug)).
 :- use_module(library(error)).
 :- use_module(library(lazy_lists)).
@@ -234,7 +235,7 @@ cancel(_Options) -->
 %       to an action.
 
 ros_action_client(ActionName, ActionType, Client, Options) :-
-    ros:node(Node, Options),
+    node_from_options(Node, Options),
     ros:ros_action_type_support(ActionType, TypeSupport),
 %   ros:qos_profile(QoSProfile, Options),
     ros:'$ros_create_action_client'(Node, TypeSupport, ActionName, _QoSProfile, Client).
@@ -253,7 +254,7 @@ ros_action_client(ActionName, ActionType, Client, Options) :-
 %   @tbd: clock, timeout
 
 ros_action_server(ActionName, ActionType, Server, Options) :-
-    ros:node(Node, Options),
+    node_from_options(Node, Options),
     server_clock(Clock, Options),
     option(result_timeout(ResultTimeOut), Options, 0.0),
     ros:ros_action_type_support(ActionType, TypeSupport),
