@@ -74,7 +74,7 @@ create_action_client(ActionName, Client) :-
         asserta(ros_action_object(ActionName, Client, Options))
     ).
 
-% ! ros_action_run(+ActionName, +Goal, :Gammar, +Options) is det.
+%!  ros_action_run(+ActionName, +Goal, :Gammar, +Options) is det.
 %
 %   Run ActionName started with message Goal and provide the response as
 %   a lazy list of terms.  Options processed:
@@ -223,11 +223,19 @@ cancel(_Options) -->
 %     - node(+Node)
 %       Node with which to associate this service
 %     - qos_profile(+QoSProfile)
-%       Dict holding QoS profiles for the various services related
-%       to an action.
+%       Dict or option list holding QoS profiles for the various
+%       services related to an action. Possible members are
+%       `goal`, `result`, `cancel`, `feedback` or `status`.
 
 ros_action_client(ActionName, ActionType, Client, Options) :-
     node_from_options(Node, Options),
     ros:ros_action_type_support(ActionType, TypeSupport),
-%   ros:qos_profile(QoSProfile, Options),
-    ros:'$ros_create_action_client'(Node, TypeSupport, ActionName, _QoSProfile, Client).
+    qos_profile_dict_from_options(client_qos, QoSProfile, Options),
+    ros:'$ros_create_action_client'(Node, TypeSupport, ActionName,
+                                    QoSProfile, Client).
+
+client_qos(goal).
+client_qos(result).
+client_qos(cancel).
+client_qos(feedback).
+client_qos(status).

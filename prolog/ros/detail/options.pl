@@ -14,12 +14,18 @@
 */
 
 :- module(ros_detail_options,
-          [ node_from_options/2,        % -Node, +Options
-            qos_profile_from_options/2  % -QoSProfile, +Options
+          [ node_from_options/2,            % -Node, +Options
+            qos_profile_from_options/2,     % -QoSProfile, +Options
+            qos_profile_dict_from_options/3 % :IsKey, -QoSProfileDict, +Options
           ]).
 :- use_module(library(ros)).
 :- autoload(library(ros/qos), [ros_qos_object/2]).
 :- use_module(library(option)).
+:- autoload(library(apply), [maplist/3]).
+:- autoload(library(error), [domain_error/2]).
+
+:- meta_predicate
+    qos_profile_dict_from_options(1, -, +).
 
 %!  node_from_opions(-Node, +Options) is det.
 %
@@ -45,3 +51,32 @@ qos_profile_from_options(QoSProfile, Options) :-
     ->  ros_qos_object(NameOrDict, QoSProfile)
     ;   true
     ).
+
+%!  qos_profile_dict_from_options(:IsKey, -QoSProfileDict, +Options) is det.
+%
+%   Get a QoS profile dict the  option   list.  This  is used for action
+%   clients and servers that take multiple QoS profiles.
+
+qos_profile_dict_from_options(IsKey, QoSProfileDict, Options) :-
+    option(qos(OptionsOrDict), Options, _{}),
+    qos_profile_dict(IsKey, OptionsOrDict, QoSProfileDict).
+
+qos_profile_dict(IsKey, OptionsOrDict, QoSDict) :-
+    is_list(OptionsOrDict),
+    dict_create(Dict, _, OptionsOrDict),
+    qos_profile_dict_dict(IsKey, Dict, QoSDict).
+qos_profile_dict(IsKey, Dict, QoSDict) :-
+    qos_profile_dict_dict(IsKey, Dict, QoSDict).
+
+qos_profile_dict_dict(IsKey, Dict, QoSDict) :-
+    dict_pairs(Dict, Tag, Pairs),
+    maplist(pair_qos_object(IsKey), Pairs, QosPairs),
+    dict_pairs(QoSDict, Tag, QosPairs).
+
+pair_qos_object(IsKey, Key-NameOrDict, Key-QoSProfile) :-
+    atom(IsKey),
+    call(IsKey, Key),
+    !,
+    ros_qos_object(NameOrDict, QoSProfile).
+pair_qos_object(_, Key-_, _) :-
+    domain_error(qos_key, Key).

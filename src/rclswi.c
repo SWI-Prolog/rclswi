@@ -109,6 +109,7 @@ static atom_t ATOM_writer_guid;
 static atom_t ATOM_active;
 static atom_t ATOM_status;
 static atom_t ATOM_server;
+static atom_t ATOM_cancel;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -1393,6 +1394,22 @@ free_rcl_action_client(void *ptr)
 }
 
 
+static int
+copy_qos(term_t dict, atom_t key, rmw_qos_profile_t *into)
+{ term_t tmp = PL_new_term_ref();
+
+  if ( PL_get_dict_key(key, dict, tmp) )
+  { rmw_qos_profile_t *qos_profile;
+
+    if ( !get_qos_profile(tmp, &qos_profile) )
+      return FALSE;
+    *into = *qos_profile;
+    return TRUE;
+  }
+
+  return TRUE;
+}
+
 static foreign_t
 ros_create_action_client(term_t Node, term_t ActType, term_t Name,
 			 term_t QoSDict,
@@ -1413,7 +1430,12 @@ ros_create_action_client(term_t Node, term_t ActType, term_t Name,
     return FALSE;
 
   action_ops = rcl_action_client_get_default_options();
-  /* TBD: Fill QoS options */
+  if ( !copy_qos(QoSDict, ATOM_goal,     &action_ops.goal_service_qos)   ||
+       !copy_qos(QoSDict, ATOM_result,   &action_ops.result_service_qos) ||
+       !copy_qos(QoSDict, ATOM_cancel,   &action_ops.cancel_service_qos) ||
+       !copy_qos(QoSDict, ATOM_feedback, &action_ops.feedback_topic_qos) ||
+       !copy_qos(QoSDict, ATOM_status,   &action_ops.status_topic_qos) )
+    return FALSE;
 
   if ( !(action_client = malloc(sizeof(*action_client))) )
     return PL_resource_error("memory");
@@ -4154,6 +4176,7 @@ install_librclswi(void)
   MKATOM(active);
   MKATOM(status);
   MKATOM(server);
+  MKATOM(cancel);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 #define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
