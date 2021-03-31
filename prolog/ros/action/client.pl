@@ -30,8 +30,21 @@
 :- meta_predicate
     ros_action_run(+, +, //, +).
 
-/** <module> Deal with ROS actions
+/** <module> Client interface for ROS actions
 */
+
+
+:- predicate_options(ros_action/3, 3,
+                     [ pass_to(ros_action_client/4, 4)
+                     ]).
+:- predicate_options(ros_action_run/4, 4,
+                     [ timeout(number),
+                       client(-any)
+                     ]).
+:- predicate_options(ros_action_client/4, 4,
+                     [ node(any),
+                       qos_profile(any)
+                     ]).
 
 :- multifile
     action_decl/3.
@@ -39,6 +52,10 @@
     action_decl/3.
 
 %!  ros_action(+ActionName, +ActionType, +Options) is det.
+%
+%   Define the properties  for  an  action   client  or  server  without
+%   creating the client or server object.   This  declaration is used to
+%   create a client instance in ros_action_run/4 from the ActionName.
 
 ros_action(ActionName, ActionType, Options) :-
     must_be(atom, ActionName),

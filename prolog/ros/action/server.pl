@@ -95,7 +95,8 @@ Info we need on an action server:
 %       Node with which to associate this service
 %     - qos_profile(+QoSProfile)
 %       Dict holding QoS profiles for the various services related
-%       to an action.
+%       to an action. Possible members are `goal`, `result`, `cancel`,
+%       `feedback` or `status`.
 %     - clock(+Clock)
 %       Clock to use.  Default is the default clock of the node.  See
 %       ros_node_property/2.
@@ -110,9 +111,9 @@ ros_action_server(ActionName, ActionType, Goal, Server, Options) :-
     server_clock(Node, Clock, Options),
     option(result_timeout(ResultTimeOut), Options, 0.0),
     ros:ros_action_type_support(ActionType, TypeSupport),
-%   ros:qos_profile(QoSProfile, Options),
+    qos_profile_dict_from_options(server_qos, QoSProfile, Options),
     ros:'$ros_create_action_server'(Node, Clock, TypeSupport, ActionName,
-                                    _QoSProfile, ResultTimeOut, Goal, Server).
+                                    QoSProfile, ResultTimeOut, Goal, Server).
 
 server_clock(_Node, Clock, Options) :-
     option(clock(Clock), Options),
@@ -120,6 +121,11 @@ server_clock(_Node, Clock, Options) :-
 server_clock(Node, Clock, _Options) :-
     ros_node_property(Node, clock(Clock)).
 
+server_qos(goal).
+server_qos(result).
+server_qos(cancel).
+server_qos(feedback).
+server_qos(status).
 
 %!  ros_action_spin(+Server) is det.
 %

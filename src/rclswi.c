@@ -1536,7 +1536,12 @@ ros_create_action_server(term_t Node, term_t Clock, term_t ActType, term_t Name,
     return FALSE;
 
   action_ops = rcl_action_server_get_default_options();
-  /* TBD: Fill QoS options */
+  if ( !copy_qos(QoSDict, ATOM_goal,     &action_ops.goal_service_qos)   ||
+       !copy_qos(QoSDict, ATOM_result,   &action_ops.result_service_qos) ||
+       !copy_qos(QoSDict, ATOM_cancel,   &action_ops.cancel_service_qos) ||
+       !copy_qos(QoSDict, ATOM_feedback, &action_ops.feedback_topic_qos) ||
+       !copy_qos(QoSDict, ATOM_status,   &action_ops.status_topic_qos) )
+    return FALSE;
   action_ops.result_timeout.nanoseconds = tmo_nsec;
 
   if ( !(action_server = malloc(sizeof(*action_server))) )
