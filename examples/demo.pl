@@ -50,6 +50,7 @@ readability).
 % Load the ROS library and make it available at the toplevel
 
 :- reexport(library(ros)).
+:- reexport(library(ros/graph)).
 :- reexport(library(ros/logging)).
 
 % This can be used to define the default   node. If this is not done the
@@ -68,7 +69,7 @@ readability).
 %   warning in the event that it dies abnormally.
 
 spin :-
-    thread_create(ros_spin, _, [detached(true)]).
+    ros_spin([thread(spinner)]).
 
 %!  turtle_listener
 %

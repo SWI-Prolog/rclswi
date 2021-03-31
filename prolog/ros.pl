@@ -26,7 +26,6 @@
             ros_publish/3,              % +Topic, +Message, +Options
             ros_publisher/2,            % +Topic, +Options
 
-            ros_current_topic/2,        % ?Topic,?Type
             ros_type_introspection/2,   % +Type, -Description
 
             ros_create_context/1,       % -Context
@@ -61,7 +60,7 @@
               permission_error/3
             ]).
 :- autoload(library(apply), [maplist/2]).
-:- autoload(library(lists), [append/3, member/2]).
+:- autoload(library(lists), [append/3]).
 :- autoload(library(option), [option/2, select_option/3, option/3]).
 :- autoload(library(prolog_code), [most_general_goal/2]).
 :- use_module(library(filesex), [directory_file_path/3]).
@@ -70,6 +69,7 @@
 :- use_module(library(ros/detail/options)).
 :- autoload(library(ros/param/services), [ros_param_services/1]).
 :- autoload(library(ros/param/store), [ros_parameter/2, import_parameters/1]).
+:- autoload(library(ros/graph), [ros_current_topic/2]).
 
 :- meta_predicate
     ros_subscribe(+, 1, +),
@@ -579,20 +579,6 @@ shutdown_waitable(subscription(_Topic), Object) :-
 
 
 		 /*******************************
-		 *        INTROSPECTION		*
-		 *******************************/
-
-%!  ros_current_topic(?Topic, ?Type)
-%
-%   True when Topic with Type is visible on the ROS network.
-
-ros_current_topic(Topic, Type) :-
-    ros_default_node(Node),
-    ros_topic_names_and_types(Node, TopicsAndTypes),
-    member(Topic-[Type], TopicsAndTypes).
-
-
-		 /*******************************
 		 *            LOW LEVEL		*
 		 *******************************/
 
@@ -880,22 +866,6 @@ simplify_action_type(action{feedback:_{feedback:Feedback, goal_id:_},
                          feedback:Feedback}.
 simplify_action_type(TypeIn, TypeOut) =>
     TypeOut = TypeIn.
-
-
-%!  ros_client_names_and_types_by_node(+Node, +NodeName, +NameSpace, -NamesAndTypes)
-%
-%   Example:
-%
-%   ```
-%   ?- ros_client_names_and_types_by_node(Node, "teleop_turtle", "", Types).
-%   Types = [ '/turtle1/rotate_absolute/_action/cancel_goal'-
-%                 ['action_msgs/srv/CancelGoal'],
-%             '/turtle1/rotate_absolute/_action/get_result'-
-%                 ['turtlesim/action/RotateAbsolute_GetResult'],
-%             '/turtle1/rotate_absolute/_action/send_goal'-
-%                 ['turtlesim/action/RotateAbsolute_SendGoal']
-%           ].
-%   ```
 
 
 %!  ros_object(?Object, ?Type) is nondet.
