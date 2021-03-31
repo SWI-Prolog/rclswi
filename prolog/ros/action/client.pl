@@ -13,14 +13,14 @@
    limitations under the License.
 */
 
-:- module(ros_actions,
+:- module(ros_action_client,
           [ ros_action/3,           % +ActionName, +ActionType, +Options
             ros_action_run/4,       % +ActionName, +Goal, :Grammar, +Options
-            ros_action_client/4,    % +ActionName, +ActionType, -Client, +Options
-            ros_action_server/4     % +ActionName, +ActionType, -Server, +Options
+            ros_action_client/4     % +ActionName, +ActionType, -Client, +Options
           ]).
 :- use_module(library(ros)).
 :- use_module(library(ros/detail/options)).
+:- use_module(library(ros/detail/actions)).
 :- use_module(library(debug)).
 :- use_module(library(error)).
 :- use_module(library(lazy_lists)).
@@ -144,7 +144,7 @@ action(status, Client, State, Item) =>
     (   member(GoalStatus, StatusArray.status_list),
         _{goal_info: GoalInfo, status: StatusCode} :< GoalStatus,
         _{goal_id:GoalID} :< GoalInfo
-    ->  goal_status_code(Status, StatusCode),
+    ->  ros:ros_enum_goal_status(StatusCode, Status),
         Item = status(Status),
         action_status(Status, State)
     ;   Item = []
@@ -175,7 +175,7 @@ action(result, Client, State, Item) =>
     assertion(State.result_sequence_number == SeqNum),
     _{result:Result, status:StatusCode} :< ResultResponse,
     Item = result(Result),
-    goal_status_code(Status, StatusCode),
+    ros:ros_enum_goal_status(StatusCode, Status),
     nb_set_dict(status, State, Status),
     nb_set_dict(final, State, true).
 
@@ -188,14 +188,6 @@ action_status(Status, State) :-
     ;   Status == aborted
     ->  nb_set_dict(final, State, true)
     ).
-
-goal_status_code(unknown,    0).
-goal_status_code(accepted,   1).
-goal_status_code(executing,  2).
-goal_status_code(cancelling, 3).
-goal_status_code(succeeded,  4).
-goal_status_code(cancelled,  5).
-goal_status_code(aborted,    6).
 
 %!  ros_cancel_action(+State, +Options)
 %
@@ -239,49 +231,3 @@ ros_action_client(ActionName, ActionType, Client, Options) :-
     ros:ros_action_type_support(ActionType, TypeSupport),
 %   ros:qos_profile(QoSProfile, Options),
     ros:'$ros_create_action_client'(Node, TypeSupport, ActionName, _QoSProfile, Client).
-
-%!  ros_action_server(+ActionName, +ActionType, -Client, +Options) is det
-%
-%   Register an action server for  ActionName that satisfies ActionType.
-%   Options processed:
-%
-%     - node(+Node)
-%       Node with which to associate this service
-%     - qos_profile(+QoSProfile)
-%       Dict holding QoS profiles for the various services related
-%       to an action.
-%
-%   @tbd: clock, timeout
-
-ros_action_server(ActionName, ActionType, Server, Options) :-
-    node_from_options(Node, Options),
-    server_clock(Clock, Options),
-    option(result_timeout(ResultTimeOut), Options, 0.0),
-    ros:ros_action_type_support(ActionType, TypeSupport),
-%   ros:qos_profile(QoSProfile, Options),
-    ros:'$ros_create_action_server'(Node, Clock, TypeSupport, ActionName,
-                                    _QoSProfile, ResultTimeOut, Server).
-
-server_clock(Clock, Options) :-
-    option(clock(Clock), Options),
-    !.
-server_clock(_, Options) :-         % must be node's default clock
-    existence_error(clock, Options).
-
-
-%!  init_goal_status is det.
-%!  init_cancel_type is det.
-%
-%   Callbacks from rclswi.c  to  establish   the  type  information  for
-%   actions.
-
-:- public
-    init_goal_status/0,
-    init_cancel_type/0.
-
-init_goal_status :-
-    ros:ros_type_support('action_msgs/msg/GoalStatusArray', Type),
-    ros:set_goal_status_type(Type).
-init_cancel_type :-
-    ros:ros_type_support('action_msgs/srv/CancelGoal', Type),
-    ros:set_action_cancel_type(Type).

@@ -76,10 +76,13 @@ install(FILES prolog/ros.pl
 )
 install(FILES prolog/ros/logging.pl
 	      prolog/ros/services.pl
-	      prolog/ros/actions.pl
 	      prolog/ros/clocks.pl
 	      prolog/ros/qos.pl
   DESTINATION prolog/ros
+)
+install(FILES prolog/ros/action/server.pl
+	      prolog/ros/action/client.pl
+  DESTINATION prolog/ros/action
 )
 install(FILES prolog/ros/param/client.pl
 	      prolog/ros/param/services.pl
@@ -88,6 +91,7 @@ install(FILES prolog/ros/param/client.pl
 )
 install(FILES prolog/ros/detail/options.pl
 	      prolog/ros/detail/param.pl
+	      prolog/ros/detail/actions.pl
   DESTINATION prolog/ros/detail
 )
 

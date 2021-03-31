@@ -1,14 +1,20 @@
-		 /*******************************
-		 *       SERVER EXPERIMENT	*
-		 *******************************/
+/*  This example code is public domain.
+*/
+
+:- module(action_server,
+          [ server/0
+          ]).
+:- use_module(library(ros)).
+:- use_module(library(ros/action/server)).
 
 server :-
-    ros_debug(10),
+%   ros_debug(10),
     debug(ros(_)),
     ros_default_context(Context),
     ros:ros_create_clock(Context, system, Clock),
     ros_action_server('/turtle1/rotate_absolute',
                       'turtlesim/action/RotateAbsolute',
+                      true,
                       Server,
                       [ clock(Clock) ]),
     server_loop(Server, []).
@@ -42,7 +48,7 @@ server_action1(goal, Server, Goals, [Handle|Goals]) :-
 server_action1(cancel, Server, Goals, Goals) :-
     ros:ros_action_take_cancel_request(Server, Request, Info),
     debug(ros(action), 'Got cancel request ~p, info ~p', [Request, Info]),
-    cancel_goals(Goals, Request.goal_info, Info).
+    cancel_goals(Server, Goals, Request.goal_info, Info).
 server_action1(result, Server, Goals, Goals) :-
     ros:ros_action_take_result_request(Server, Request, Info),
     debug(ros(action), 'Got result request ~p, info ~p', [Request, Info]),
@@ -70,16 +76,39 @@ run(Theta, Server, GoalID, Handle) :-
     run(Theta2, Server, GoalID, Handle).
 
 
-cancel_goals([], _, _).
-cancel_goals([H|T], CancelInfo, MsgInfo) :-
-    ros:'$ros_action_goal_prop'(H, goal_info, ThisInfo),
-    (   cancel_matches(ThisInfo, CancelInfo)
-    ->  debug(ros(action), 'Cancelling ~p', [ThisInfo]),
-        ros:ros_action_update_goal_state(H, cancel_goal)
-        % TBD: What to do here?
-    ;   true
+%!  cancel_goals(+Server, +OurGoals, +CancelInfo, +MsgInfo)
+%
+%   Cancel all goals from OurGoals that match CancelInfo.
+
+cancel_goals(Server, Goals, CancelInfo, MsgInfo) :-
+    cancelling(Goals, CancelInfo, Cancelling),
+    (   Cancelling == []
+    ->  Status = unknown_goal_id
+    ;   ros:ros_action_publish_status(Server),
+        Status = none
     ),
-    cancel_goals(T, CancelInfo, MsgInfo).
+    cancel_enum(Code, Status),
+    ros:ros_action_send_cancel_response(Server,
+                                        _{ return_code:Code,
+                                           goals_canceling:Cancelling},
+                                        MsgInfo).
+
+cancelling([], _, []).
+cancelling([H|T0], CancelInfo, [H|T]) :-
+    ros:'$ros_action_goal_prop'(H, goal_info, ThisInfo),
+    cancel_matches(ThisInfo, CancelInfo),
+    !,
+    debug(ros(action), 'Cancelling ~p', [ThisInfo]),
+    ros:ros_action_update_goal_state(H, cancel_goal),
+    cancelling(T0, CancelInfo, T).
+cancelling([_|T0], CancelInfo, T) :-
+    cancelling(T0, CancelInfo, T).
+
+cancel_enum(0, none).
+cancel_enum(1, rejected).
+cancel_enum(1, unknown_goal_id).
+cancel_enum(1, goal_terminated).
+
 
 % TBD: include time in the matching
 cancel_matches(ThisInfo, CancelInfo) :-

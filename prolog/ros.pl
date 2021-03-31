@@ -278,6 +278,10 @@ waitables_on(Node) :-
 %
 %   @tbd Cache current set of waitables
 
+:- multifile
+    ros_ready/1,
+    ros_ready/3.
+
 ros_spin_once(Node, TimeOut) :-
     findall(Obj, waitable(_Type, Node, Obj, _Callback), WaitFor),
     WaitFor \== [],
@@ -299,9 +303,6 @@ ros_ready_det(Type, Obj, CallBack) :-
     print_message(warning,
                   ros(callback_failed(ros_ready(Type, Obj, CallBack)))).
 
-
-:- multifile
-    ros_ready/3.
 
 ros_ready(subscription(_), Subscription, CallBack) :-
     ros_take(Subscription, Message, _MsgInfo),
@@ -517,6 +518,29 @@ init_node_parameters(Node, Options) :-
 add_parameter(Node, Name-Options) =>
     ros_parameter(Name, [node(Node),publish(false)|Options]).
 
+
+%!  node_clock(+Node, -Clock) is det.
+%
+%   Get the clock for the given node.  Create   a  new clock if the node
+%   does not have a clock yet.
+%
+%   @tbd: Define the type of clock to be created
+
+node_clock(Node, Clock) :-
+    node_object(clock, Node, Clock0),
+    !,
+    Clock = Clock0.
+node_clock(Node, Clock) :-
+    ros_node_property(Node, context(Context)),
+    ros_synchronized(Node, create_node_clock(Node, Context, Clock0)),
+    Clock = Clock0.
+
+create_node_clock(Node, _Context, Clock) :-
+    node_object(clock, Node, Clock),
+    !.
+create_node_clock(_Node, Context, Clock) :-
+    ros_create_clock(Context, system, Clock).
+
 %!  ros_synchronized(+Object, :Goal) is semidet.
 %
 %   Run Goal synchronized on the mutex associated with Object. Currently
@@ -605,6 +629,8 @@ ros_ok :-
 %     - logger_name(LoggerName)
 %       Name of the default logger for this node. See
 %       library(ros/logging) for details.
+%     - clock(-Clock)
+%       Get the clock associated to this node.
 
 ros_node_property(Node, Property) :-
     ros_property_node(Property, Node).
@@ -619,6 +645,10 @@ ros_property_node(qname(QName), Node) :-
     format(atom(QName), '~w~w', [NameSpace, Name]).
 ros_property_node(logger_name(Name), Node) :-
     '$ros_node_prop'(Node, logger_name, Name).
+ros_property_node(clock(Clock), Node) :-
+    node_clock(Node, Clock).
+ros_property_node(context(Context), Node) :-
+    '$ros_node_prop'(Node, context, Context).
 
 %!  ros_publisher(+Node, +MsgType, +Topic, +QoSProfile, -Publisher)
 %

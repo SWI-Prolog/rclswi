@@ -106,6 +106,9 @@ static atom_t ATOM_steady;
 static atom_t ATOM_system;
 static atom_t ATOM_type;
 static atom_t ATOM_writer_guid;
+static atom_t ATOM_active;
+static atom_t ATOM_status;
+static atom_t ATOM_server;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_ros_error2;
@@ -503,18 +506,25 @@ rclswi_parse_args(term_t list, rcl_arguments_t *parsed_args)
 		 *	       NODE		*
 		 *******************************/
 
+typedef struct
+{ rcl_node_t node;
+  atom_t     context_symbol;
+} rclswi_node_t;
+
+
 static void
 free_rcl_node(void* ptr)
-{ rcl_node_t *node = ptr;
+{ rclswi_node_t *node = ptr;
 
-  TRYVOID(rcl_node_fini(node));
+  PL_unregister_atom(node->context_symbol);
+  TRYVOID(rcl_node_fini(&node->node));
 }
 
 
 static foreign_t
 ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
 { rcl_context_t *context;
-  rcl_node_t *node;
+  rclswi_node_t *node;
   rcl_node_options_t options = rcl_node_get_default_options();
   rcl_arguments_t arguments = rcl_get_zero_initialized_arguments();
   int use_global_arguments = TRUE;
@@ -526,10 +536,12 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
   term_t tail = PL_copy_term_ref(Options);
   term_t head = PL_new_term_ref();
   term_t arg = PL_new_term_ref();
+  atom_t context_symbol;
 
   if ( !PL_get_chars(Name, &node_name, CVT_ATOMIC|CVT_EXCEPTION|REP_UTF8) )
     return FALSE;
-  if ( !get_pointer(Context, (void**)&context, &context_type) )
+  if ( !get_pointer_and_symbol(Context, (void**)&context, &context_symbol,
+			       &context_type) )
     return FALSE;
 
   while(PL_get_list_ex(tail, head, tail))
@@ -564,19 +576,22 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
     { rc=PL_resource_error("memory");
       OUTFAIL;
     }
-    *node = rcl_get_zero_initialized_node();
+    node->context_symbol = context_symbol;
+    node->node = rcl_get_zero_initialized_node();
     options.use_global_arguments = use_global_arguments;
     options.arguments = arguments;
     options.enable_rosout = enable_rosout;
   }
 
-  TRY(rcl_node_init(node, node_name, namespace, context, &options));
+  TRY(rcl_node_init(&node->node, node_name, namespace, context, &options));
 
 out:
   TRY_ANYWAY(rcl_arguments_fini(&arguments));
 
   if ( rc )
+  { PL_register_atom(node->context_symbol);
     return unify_pointer(Node, node, &node_type);
+  }
 
   return rc;
 }
@@ -584,14 +599,14 @@ out:
 
 static foreign_t
 ros_node_fini(term_t Node)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
 
   if ( !get_pointer(Node, (void**)&node, &node_type) )
     return FALSE;
 
-  if ( rcl_node_is_valid(node) )
-    TRY(rcl_node_fini(node));
+  if ( rcl_node_is_valid(&node->node) )
+    TRY(rcl_node_fini(&node->node));
   else
     rc = PL_existence_error("ros_node", Node);
 
@@ -601,7 +616,7 @@ ros_node_fini(term_t Node)
 
 static foreign_t
 ros_node_prop(term_t Node, term_t Prop, term_t Value)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   atom_t prop;
 
   if ( !get_pointer(Node, (void**)&node, &node_type) ||
@@ -609,17 +624,19 @@ ros_node_prop(term_t Node, term_t Prop, term_t Value)
     return FALSE;
 
   if ( prop == ATOM_name )
-  { const char *node_name = rcl_node_get_name(node);
+  { const char *node_name = rcl_node_get_name(&node->node);
     if ( node_name )
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, node_name);
   } else if ( prop == ATOM_namespace )
-  { const char *namespace = rcl_node_get_namespace(node);
+  { const char *namespace = rcl_node_get_namespace(&node->node);
     if ( namespace )
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, namespace);
   } else if ( prop == ATOM_logger_name )
-  { const char *logger_name = rcl_node_get_logger_name(node);
+  { const char *logger_name = rcl_node_get_logger_name(&node->node);
     if ( logger_name )
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, logger_name);
+  } else if ( prop == ATOM_context )
+  { return PL_unify_atom(Value, node->context_symbol);
   }
 
   return FALSE;
@@ -651,7 +668,7 @@ free_rcl_publisher(void *ptr)
 static foreign_t
 ros_publisher(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
 	      term_t Publisher)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *topic;
   rcl_publisher_options_t publisher_ops = rcl_publisher_get_default_options();
@@ -675,10 +692,10 @@ ros_publisher(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
   if ( !(pub = malloc(sizeof(*pub))) )
     return PL_resource_error("memory");
   pub->publisher = rcl_get_zero_initialized_publisher();
-  pub->node = node;
+  pub->node = &node->node;
   pub->type_support = msg_type;
 
-  TRY(rcl_publisher_init(&pub->publisher, node, msg_type->type_support,
+  TRY(rcl_publisher_init(&pub->publisher, &node->node, msg_type->type_support,
 			 topic, &publisher_ops));
 
   if ( !rc )
@@ -739,7 +756,7 @@ free_rcl_subscription(void *ptr)
 static foreign_t
 ros_subscribe(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
 	      term_t Subscription)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *topic;
   rcl_subscription_options_t subscription_ops = rcl_subscription_get_default_options();
@@ -763,12 +780,12 @@ ros_subscribe(term_t Node, term_t MsgType, term_t Topic, term_t QoSProfile,
   if ( !(sub = malloc(sizeof(*sub))) )
     return PL_resource_error("memory");
   sub->subscription = rcl_get_zero_initialized_subscription();
-  sub->node = node;
+  sub->node = &node->node;
   sub->type_support = msg_type;
   sub->waiting = FALSE;
   sub->deleted = FALSE;
 
-  TRY(rcl_subscription_init(&sub->subscription, node,
+  TRY(rcl_subscription_init(&sub->subscription, &node->node,
 			    msg_type->type_support, topic, &subscription_ops));
 
   if ( !rc )
@@ -846,7 +863,7 @@ free_rcl_client(void *ptr)
 static foreign_t
 ros_create_client(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
 		  term_t Client)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *service_name;
   rclswi_srv_type_t *srv_type;
@@ -870,12 +887,12 @@ ros_create_client(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
   if ( !(client = malloc(sizeof(*client))) )
     return PL_resource_error("memory");
   client->client       = rcl_get_zero_initialized_client();
-  client->node	       = node;
+  client->node	       = &node->node;
   client->type_support = srv_type;
   client->waiting      = FALSE;
   client->deleted      = FALSE;
 
-  TRY(rcl_client_init(&client->client, node,
+  TRY(rcl_client_init(&client->client, &node->node,
 		      srv_type->type_support, service_name, &client_ops));
 
   if ( !rc )
@@ -1070,7 +1087,7 @@ free_rcl_service(void *ptr)
 static foreign_t
 ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
 		   term_t Service)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *service_name;
   rclswi_srv_type_t *srv_type;
@@ -1095,14 +1112,14 @@ ros_create_service(term_t Node, term_t SrvType, term_t Name, term_t QoSProfile,
   if ( !(service = malloc(sizeof(*service))) )
     return PL_resource_error("memory");
   service->service      = rcl_get_zero_initialized_service();
-  service->node	        = node;
+  service->node	        = &node->node;
   service->type_support = srv_type;
   service->name		= PL_new_atom(service_name);
   service->node_symbol  = node_symbol;
   service->waiting      = FALSE;
   service->deleted      = FALSE;
 
-  TRY(rcl_service_init(&service->service, node,
+  TRY(rcl_service_init(&service->service, &node->node,
 		      srv_type->type_support, service_name, &service_ops));
 
   if ( !rc )
@@ -1344,7 +1361,7 @@ set_action_cancel_type(term_t SrvType)
 static rclswi_srv_type_t *
 goal_cancel_type_support(void)
 { if ( !cancel_type_ptr )
-  { predicate_t pred = PL_predicate("init_cancel_type", 0, "ros_actions");
+  { predicate_t pred = PL_predicate("init_cancel_type", 0, "ros_detail_actions");
 
     if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
       return NULL;
@@ -1380,7 +1397,7 @@ static foreign_t
 ros_create_action_client(term_t Node, term_t ActType, term_t Name,
 			 term_t QoSDict,
 			 term_t ActionClient)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *action_name;
   rclswi_action_type_t *action_type;
@@ -1401,7 +1418,7 @@ ros_create_action_client(term_t Node, term_t ActType, term_t Name,
   if ( !(action_client = malloc(sizeof(*action_client))) )
     return PL_resource_error("memory");
   action_client->action_client = rcl_action_get_zero_initialized_client();
-  action_client->node	       = node;
+  action_client->node	       = &node->node;
   action_client->type_support  = action_type;
   action_client->name	       = PL_new_atom(action_name);
   action_client->node_symbol   = node_symbol;
@@ -1409,7 +1426,7 @@ ros_create_action_client(term_t Node, term_t ActType, term_t Name,
   action_client->deleted       = FALSE;
 
   TRY(rcl_action_client_init(
-	  &action_client->action_client, node,
+	  &action_client->action_client, &node->node,
 	  action_type->type_support, action_name, &action_ops));
 
   if ( !rc )
@@ -1451,6 +1468,7 @@ typedef struct
   atom_t		node_symbol;
   atom_t		clock_symbol;
   atom_t		name;
+  record_t		goal;
   int		        waiting;
   int		        deleted;
 } rclswi_action_server_t;
@@ -1463,6 +1481,7 @@ free_rcl_action_server(void *ptr)
   PL_unregister_atom(server->node_symbol);
   PL_unregister_atom(server->clock_symbol);
   PL_unregister_atom(server->name);
+  PL_erase(server->goal);
 
   TRYVOID(rcl_action_server_fini(&server->action_server, server->node));
 }
@@ -1470,9 +1489,9 @@ free_rcl_action_server(void *ptr)
 
 static foreign_t
 ros_create_action_server(term_t Node, term_t Clock, term_t ActType, term_t Name,
-			 term_t QoSDict, term_t ResultTimeOut,
+			 term_t QoSDict, term_t ResultTimeOut, term_t Goal,
 			 term_t ActionServer)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   char *action_name;
   rclswi_action_type_t *action_type;
@@ -1501,21 +1520,23 @@ ros_create_action_server(term_t Node, term_t Clock, term_t ActType, term_t Name,
   if ( !(action_server = malloc(sizeof(*action_server))) )
     return PL_resource_error("memory");
   action_server->action_server = rcl_action_get_zero_initialized_server();
-  action_server->node	       = node;
+  action_server->node	       = &node->node;
   action_server->type_support  = action_type;
   action_server->name	       = PL_new_atom(action_name);
   action_server->node_symbol   = node_symbol;
   action_server->clock_symbol  = clock_symbol;
   action_server->waiting       = FALSE;
   action_server->deleted       = FALSE;
+  action_server->goal          = PL_record(Goal);
 
   TRY(rcl_action_server_init(
-	  &action_server->action_server, node,
+	  &action_server->action_server, &node->node,
 	  &clock->clock,
 	  action_type->type_support, action_name, &action_ops));
 
   if ( !rc )
   { PL_unregister_atom(action_server->name);
+    PL_erase(action_server->goal);
     free(action_server);
   } else
   { PL_register_atom(action_server->node_symbol);
@@ -1531,6 +1552,7 @@ static foreign_t
 ros_action_server_prop(term_t ActionServer, term_t Key, term_t Value)
 { rclswi_action_server_t *action_server;
   atom_t key;
+  term_t tmp;
 
   if ( get_pointer(ActionServer, (void**)&action_server, &action_server_type) &&
        PL_get_atom_ex(Key, &key) )
@@ -1540,6 +1562,10 @@ ros_action_server_prop(term_t ActionServer, term_t Key, term_t Value)
       return PL_unify_atom(Value, action_server->name);
     else if ( key == ATOM_clock )
       return PL_unify_atom(Value, action_server->clock_symbol);
+    else if ( key == ATOM_goal )
+      return ( (tmp=PL_new_term_ref()) &&
+	       PL_recorded(action_server->goal, tmp) &&
+	       PL_unify(tmp, Value));
   }
 
   return FALSE;
@@ -2035,7 +2061,7 @@ set_goal_status_type(term_t MsgType)
 static rclswi_message_type_t *
 goal_status_type(void)
 { if ( !status_type_ptr )
-  { predicate_t pred = PL_predicate("init_goal_status", 0, "ros_actions");
+  { predicate_t pred = PL_predicate("init_goal_status", 0, "ros_detail_actions");
 
     if ( !PL_call_predicate(NULL, PL_Q_NODEBUG|PL_Q_PASS_EXCEPTION, pred, 0) )
       return NULL;
@@ -2150,13 +2176,21 @@ out:
   return rc;
 }
 
+typedef struct
+{ rcl_action_goal_handle_t *handle;	 /* RCL Goal handle */
+  atom_t		    server;	 /* Server it is associated with */
+} rclswi_action_goal_handle_t;
+
 
 
 static void
 free_goal_handle(void *ptr)
-{ rcl_action_goal_handle_t *goal_handle = ptr;
+{ rclswi_action_goal_handle_t *goal_handle = ptr;
 
-  TRYVOID(rcl_action_goal_handle_fini(goal_handle));
+  if ( goal_handle->handle )
+    TRYVOID(rcl_action_goal_handle_fini(goal_handle->handle));
+  if ( goal_handle->server )
+    PL_unregister_atom(goal_handle->server);
 }
 
 
@@ -2169,9 +2203,11 @@ ros_action_accept_new_goal(term_t ActionServer, term_t GoalID, term_t Stamp,
 { rclswi_action_server_t *action_server;
   int rc = TRUE;
   rcl_action_goal_info_t goal_info = rcl_action_get_zero_initialized_goal_info();
-  rcl_action_goal_handle_t *goal_handle;
+  rclswi_action_goal_handle_t *goal_handle = NULL;
+  atom_t server_symbol;
 
-  if ( !get_pointer(ActionServer, (void**)&action_server, &action_server_type) )
+  if ( !get_pointer_and_symbol(ActionServer, (void**)&action_server,
+			       &server_symbol, &action_server_type) )
     return FALSE;
 
   if ( !fill_uuid(GoalID, &goal_info.goal_id.uuid) )
@@ -2179,8 +2215,13 @@ ros_action_accept_new_goal(term_t ActionServer, term_t GoalID, term_t Stamp,
   if ( !fill_time_stamp(Stamp, &goal_info.stamp, TRUE) )
     return FALSE;
 
-  if ( !(goal_handle = rcl_action_accept_new_goal(&action_server->action_server,
-						  &goal_info)) )
+  if ( !(goal_handle=malloc(sizeof(*goal_handle))) )
+    return PL_resource_error("memory");
+  goal_handle->server = server_symbol;
+  PL_register_atom(goal_handle->server);
+
+  if ( !(goal_handle->handle = rcl_action_accept_new_goal(&action_server->action_server,
+							  &goal_info)) )
   { set_error(0);
     OUTFAIL;
   }
@@ -2188,6 +2229,9 @@ ros_action_accept_new_goal(term_t ActionServer, term_t GoalID, term_t Stamp,
   rc = rc && unify_pointer(GoalHandle, goal_handle, &goal_handle_type);
 
 out:
+  if ( !rc && goal_handle )
+    free_goal_handle(goal_handle);
+
   return rc;
 }
 
@@ -2203,7 +2247,7 @@ static enum_decl enum_action_goal_event[] =
 
 static foreign_t
 ros_action_update_goal_state(term_t GoalHandle, term_t State)
-{ rcl_action_goal_handle_t *goal_handle;
+{ rclswi_action_goal_handle_t *goal_handle;
   rcl_action_goal_event_t event;
   int rc = TRUE;
 
@@ -2212,15 +2256,40 @@ ros_action_update_goal_state(term_t GoalHandle, term_t State)
   if ( !get_enum(State, "action_goal_event", enum_action_goal_event, (int*)&event) )
     return FALSE;
 
-  TRY(rcl_action_update_goal_state(goal_handle, event));
+  TRY(rcl_action_update_goal_state(goal_handle->handle, event));
 
   return rc;
 }
 
 
+static enum_decl enum_action_goal_status[] =
+{ EN_DECL(GOAL_STATE_UNKNOWN,	unknown),
+  EN_DECL(GOAL_STATE_ACCEPTED,  accepted),
+  EN_DECL(GOAL_STATE_EXECUTING, executing),
+  EN_DECL(GOAL_STATE_CANCELING, canceling),
+  EN_DECL(GOAL_STATE_SUCCEEDED, succeeded),
+  EN_DECL(GOAL_STATE_CANCELED,	canceled),
+  EN_DECL(GOAL_STATE_ABORTED,   aborted),
+  EN_END()
+};
+
+static foreign_t
+ros_enum_goal_status(term_t AsInt, term_t AsAtom)
+{ int val;
+
+  if ( PL_get_integer(AsInt, &val) )
+  { return unify_enum(AsAtom, enum_action_goal_status, val);
+  } else if ( get_enum(AsAtom, "goal_status", enum_action_goal_status, &val) )
+  { return PL_unify_integer(AsInt, val);
+  }
+
+  return FALSE;
+}
+
+
 static foreign_t
 ros_action_goal_prop(term_t GoalHandle, term_t Prop, term_t Value)
-{ rcl_action_goal_handle_t *goal_handle;
+{ rclswi_action_goal_handle_t *goal_handle;
   atom_t prop;
   int rc = TRUE;
 
@@ -2232,14 +2301,23 @@ ros_action_goal_prop(term_t GoalHandle, term_t Prop, term_t Value)
   { rcl_action_goal_info_t info = rcl_action_get_zero_initialized_goal_info();
     term_t tmp = PL_new_term_ref();
 
-    TRY(rcl_action_goal_handle_get_info(goal_handle, &info));
+    TRY(rcl_action_goal_handle_get_info(goal_handle->handle, &info));
     rc = rc && put_msg_goal_info(tmp, &info) &&
 	       PL_unify(tmp, Value);
+  } else if ( prop == ATOM_server )
+  { return PL_unify_atom(Value, goal_handle->server);
+  } else if ( prop == ATOM_active )
+  { return PL_unify_bool(Value, rcl_action_goal_handle_is_active(goal_handle->handle));
+  } else if ( prop == ATOM_status )
+  { rcl_action_goal_state_t status;
+    TRY(rcl_action_goal_handle_get_status(goal_handle->handle, &status));
+    return rc && unify_enum(Value, enum_action_goal_status, status);
   } else
     rc = FALSE;
 
   return rc;
 }
+
 
 		 /*******************************
 		 *	    PARAMETERS		*
@@ -2317,7 +2395,7 @@ put_params(term_t Params, const rcl_node_params_t *params)
   for(; i < params->num_params; i++)
   { if ( !(keys[i] = PL_new_atom_mbchars(REP_UTF8, (size_t)-1,
 					 params->parameter_names[i])) ||
-	 !put_param_value(values+i, params->parameter_values) )
+	 !put_param_value(values+i, &params->parameter_values[i]) )
       OUTFAIL;
   }
   rc = PL_put_dict(Params, ATOM_parameters, params->num_params, keys, values);
@@ -2383,7 +2461,7 @@ parse_param_overrides(term_t Params, const rcl_arguments_t *args)
 
 static foreign_t
 ros_get_node_parameters(term_t Node, term_t Which, term_t Params)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
   atom_t which;
   term_t Tmp = PL_new_term_ref();
@@ -2392,11 +2470,11 @@ ros_get_node_parameters(term_t Node, term_t Which, term_t Params)
        !PL_get_atom_ex(Which, &which) )
     return FALSE;
 
-  const rcl_node_options_t *node_options = rcl_node_get_options(node);
+  const rcl_node_options_t *node_options = rcl_node_get_options(&node->node);
 
   if ( which == ATOM_global )
   { if ( node_options->use_global_arguments )
-      rc = parse_param_overrides(Tmp, &node->context->global_arguments);
+      rc = parse_param_overrides(Tmp, &node->node.context->global_arguments);
     else
       rc = PL_put_nil(Tmp);
   } else if ( which == ATOM_local )
@@ -3901,7 +3979,7 @@ static foreign_t
 ros_client_names_and_types(term_t Node,
 			   term_t NodeName, term_t NameSpace,
 			   term_t NamesAndTypes)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   char *node_name;
   char *namespace;
   rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
@@ -3913,7 +3991,7 @@ ros_client_names_and_types(term_t Node,
     return FALSE;
 
   TRY(rcl_get_client_names_and_types_by_node(
-	  node, &rclswi_default_allocator, node_name, namespace,
+	  &node->node, &rclswi_default_allocator, node_name, namespace,
 	  &nat));
 
   if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
@@ -3927,14 +4005,15 @@ out:
 
 static foreign_t
 ros_topic_names_and_types(term_t Node, term_t NamesAndTypes)
-{ rcl_node_t *node;
+{ rclswi_node_t *node;
   int rc = TRUE;
 
   if ( !get_pointer(Node, (void**)&node, &node_type) )
     return FALSE;
 
   rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
-  TRY(rcl_get_topic_names_and_types(node, &rclswi_default_allocator, FALSE, &nat));
+  TRY(rcl_get_topic_names_and_types(&node->node,
+				    &rclswi_default_allocator, FALSE, &nat));
 
   if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
     OUTFAIL;
@@ -4044,6 +4123,9 @@ install_librclswi(void)
   MKATOM(system);
   MKATOM(type);
   MKATOM(writer_guid);
+  MKATOM(active);
+  MKATOM(status);
+  MKATOM(server);
 
   rclswi_default_allocator = rcl_get_default_allocator();
 #define PRED(name, argc, func, flags) PL_register_foreign(name, argc, func, flags)
@@ -4064,7 +4146,7 @@ install_librclswi(void)
   PRED("$ros_create_client",	     5,	ros_create_client,	    0);
   PRED("$ros_create_service",	     5,	ros_create_service,	    0);
   PRED("$ros_create_action_client",  5,	ros_create_action_client,   0);
-  PRED("$ros_create_action_server",  7,	ros_create_action_server,   0);
+  PRED("$ros_create_action_server",  8,	ros_create_action_server,   0);
 
   PRED("ros_create_clock",	     3, ros_create_clock,	    0);
   PRED("ros_clock_time",	     2, ros_clock_time,		    0);
@@ -4110,9 +4192,10 @@ install_librclswi(void)
   PRED("ros_action_expire_goals", 3, ros_action_expire_goals, 0);
 
   PRED("set_action_cancel_type",     1, set_action_cancel_type,     0);
-  PRED("set_goal_status_type",     1, set_goal_status_type,     0);
+  PRED("set_goal_status_type",       1, set_goal_status_type,       0);
 
   PRED("ros_enum_param_type",	     2, ros_enum_param_type,        0);
+  PRED("ros_enum_goal_status",	     2, ros_enum_goal_status,       0);
   PRED("ros_get_node_parameters",    3, ros_get_node_parameters,    0);
 
   PRED("ros_rwm_implementation",     1,	ros_rwm_implementation,	    0);

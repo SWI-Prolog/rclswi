@@ -9,7 +9,7 @@
 :- use_module(library(lists)).
 
 :- use_module(library(ros)).
-:- use_module(library(ros/actions)).
+:- use_module(library(ros/action/client)).
 :- use_module(library(ros/param/store)).
 :- use_module(library(ros/logging)).
 
