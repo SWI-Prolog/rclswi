@@ -79,6 +79,7 @@ install(FILES prolog/ros/logging.pl
 	      prolog/ros/clocks.pl
 	      prolog/ros/qos.pl
 	      prolog/ros/graph.pl
+	      prolog/ros/types.pl
   DESTINATION prolog/ros
 )
 install(FILES prolog/ros/action/server.pl

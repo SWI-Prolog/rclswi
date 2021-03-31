@@ -26,28 +26,19 @@
             ros_publish/3,              % +Topic, +Message, +Options
             ros_publisher/2,            % +Topic, +Options
 
-            ros_type_introspection/2,   % +Type, -Description
-
-            ros_create_context/1,       % -Context
-            ros_init/3,                 % +Context, +Args, ?DomainID
             ros_create_node/3,          % +Name, -Node, +Options
             ros_node_property/2,        % +Node, ?Property
-
-            ros_publisher/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Publisher
-            ros_subscribe/5,            % +Node, +MsgType, +Topic, +QoSProfile, -Subscription
 
             ros_wait/3,                 % +WaitSet, +TimeOut, -Ready
 
             ros_take/3,			% +Subscription, -Message, -MessageInfo
 
-            ros_client_names_and_types/4, % +Node, +NodeName, +NameSpace, -NamesAndTypes
             ros_property/1,             % ?Property
             ros_debug/1,                % +Level
             ros_default_context/1,      % -Context
             ros_default_node/1,         % -Node
             ros_node/2,                 % +Alias, -Node
 
-            ros_identifier_prolog/2,    % ?RosName, ?PrologName
             ros_object/2,               % ?Object, ?Type
             ros_synchronized/2          % +Object, :Goal
           ]).
@@ -78,6 +69,19 @@
 :- predicate_options(ros_spin/1, 1,
                      [ node(any),
                        thread(atom)
+                     ]).
+:- predicate_options(ros_subscribe/3, 3,
+                     [ node(any),
+                       message_type(atom),
+                       qos_profile(any)
+                     ]).
+:- predicate_options(ros_publisher/2, 2,
+                     [ node(any),
+                       message_type(atom),
+                       qos_profile(any)
+                     ]).
+:- predicate_options(ros_publish/3, 3,
+                     [ node(any)
                      ]).
 
 
@@ -131,16 +135,15 @@ type_introspection_function_prefix(
 %   calling ros_spin/0,1, which can  be  a   different  thread  than the
 %   thread that registers the subscription.  Options:
 %
+%
+%     - node(+Node)
+%       Specify the node to use.  Default is the node returned by
+%       ros_default_node/1.
 %     - message_type(+MessageType)
 %       Provide the message type.  Default is to inspect the ROS graph
 %       to obtain the MessageType.  See ros_current_topic/2.  Providing
 %       the type explicitly can be used to subscribe while no publisher
 %       exists (yet) as well as to be explicit about what you expect.
-%
-%     - node(+Node)
-%       Specify the node to use.  Default is the node returned by
-%       ros_default_node/1.
-%
 %     - qos_profile(+QoSProfile)
 %       Quality of Service profile.  Not yet defined or implemented.
 
@@ -204,6 +207,8 @@ ros_publish(Topic, Message, Options) :-
 %     - message_type(+Type)
 %       Message type.  When omitted ros_current_topic/2 is used to try
 %       and infer the type.
+%     - qos_profile(+QoSProfile)
+%       Quality of Service profile.  Not yet defined or implemented.
 
 ros_publisher(Topic, Options) :-
     node_from_options(Node, Options),
@@ -805,69 +810,6 @@ rwm_c_identifier(Id) :-
     split_string(RWM_ID, "_", "", [_,MW,_]),
     atom_concat(MW, '_c', Id).
 
-%!  ros_type_introspection(+RosType, -Description) is det.
-%
-%   Describe a ros type using a Prolog term. RosType is either a message
-%   or a service. The type description is   formatted as below. All type
-%   names are mapped to lowercase,   replacing CamelCase word boundaries
-%   with underscores, e.g., `CamelCase` -> `camel_case`.
-%
-%     - A structure is mapped to a SWI-Prolog dict.  The _tag_ is
-%       the structure type name.  The _keys_ represent the fields
-%       of the structure and the _values_ the types of the values.
-%     - A dynamic array is represented as list(Type)
-%     - A fixed array is represented as list(Type, Size)
-%     - Primitives are `float`, `double`, `long_double`, `char`,
-%       `wchar`, `boolean`, `octet`, `uint8`, `int8`, `uint16`,
-%       `int16`, `uint32`, `int32`, `uint64`, `int64`, `string`
-%       or `wstring`.
-%
-%    For example (output edited for readability):
-%
-%    ```
-%    ?- os_type_introspection('rcl_interfaces/msg/Log', T).
-%    log{ file:string,
-%         function:string,
-%         level:uint8,
-%         line:uint32,
-%         msg:string,
-%         name:string,
-%         stamp:time{nanosec:uint32,sec:int32}
-%       }
-%    ```
-%
-%    When an actual message  is  translated   to/from  Prolog  some  ROS
-%    builtin types are handled special. Note  that when translating from
-%    Prolot to ROS both the  canonical   representation  and the special
-%    representation are accepted.  This list will probably extended, for
-%    example for dealing with time.
-%
-%      - uuid{uuid:list(uint8,16)}
-%        This is mapped to/from an atom using the hexadecimal UUID
-%        notation that is also used by uuid/1.
-%
-%    If RosType is a service, Description is   a  dict of type `service`
-%    with the keys `request` and `response`.   If  RosType is an action,
-%    Description is a dict with keys `goal`, `result` and `feedback`.
-
-ros_type_introspection(Type, Description) :-
-    ros_type_support(Type, TypeBlob),
-    '$ros_type_introspection'(TypeBlob, Description0),
-    simplify_action_type(Description0, Description).
-
-simplify_action_type(action{feedback:_{feedback:Feedback, goal_id:_},
-                            goal_request:_{goal:Goal,goal_id:_},
-                            goal_response:_,
-                            result_request:_,
-                            result_response:_{result:Result,status:_}},
-                     Description) =>
-    Description = action{goal:Goal,
-                         result:Result,
-                         feedback:Feedback}.
-simplify_action_type(TypeIn, TypeOut) =>
-    TypeOut = TypeIn.
-
-
 %!  ros_object(?Object, ?Type) is nondet.
 %
 %   True when Object is a handle to a ROS object of type Type.
@@ -890,9 +832,3 @@ ros_object(Object, Type) :-
 
 ros_property(rmw_identifier(Id)) :-
     ros_rwm_implementation(Id).
-
-%!  ros_identifier_prolog(?Ros, ?Prolog) is det.
-%
-%   Translate  between  ROS  CamelCase  (type)  identifiers  and  Prolog
-%   underscore separated identifies.  At  least   one  argument  must be
-%   instantiated to an atom. Currently only supports ASCII identifiers.

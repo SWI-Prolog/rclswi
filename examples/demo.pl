@@ -51,6 +51,7 @@ readability).
 
 :- reexport(library(ros)).
 :- reexport(library(ros/graph)).
+:- reexport(library(ros/types)).
 :- reexport(library(ros/logging)).
 
 % This can be used to define the default   node. If this is not done the
