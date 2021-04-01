@@ -1,3 +1,0 @@
-{ "symlink-install": true,
-  "cmake-args": ["-DCMAKE_C_COMPILER=/bin/gcc-7"]
-}
