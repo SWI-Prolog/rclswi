@@ -168,7 +168,8 @@ server_action1(cancel, Server) =>
     debug(ros(action), 'Cancel request for ~p', [GoalInfo]),
     cancel_goals(Server, GoalInfo, Info).
 server_action1(expired, Server) =>
-    debug(ros(action), 'Got expired event', [Server]).
+    debug(ros(action), 'Got expired event', [Server]),
+    expire_goals(Server).
 
 :- dynamic
     goal/4.                         % Server, Handle, GoalID, Thread
@@ -228,8 +229,14 @@ managed_goal(Server, GoalID, Callback, Goal) :-
     ;   true
     ),
     (   Error == ros(cancel)
-    ->  throw(Error)
-    ;   ros:ros_action_update_goal_state(Handle, succeed),
+    ->  ros:ros_action_update_goal_state(Handle, cancelled),
+        ros:ros_action_publish_status(Server),
+        throw(Error)
+    ;   (   Success == true
+        ->  NewState = succeed
+        ;   NewState = abort
+        ),
+        ros:ros_action_update_goal_state(Handle, NewState),
         ros:ros_action_publish_status(Server),
         thread_get_message(Me, ros(send_result_request(Info)), [timeout(10)]),
         debug(ros(action), 'Asked to send result', []),
@@ -297,6 +304,24 @@ cancel_goal(Thread, Status) :-
     ->  Status = none
     ;   Status = goal_terminated
     ).
+
+%!  expire_goals(+Server) is det.
+%
+%   Deal with an expire event. I think  this   is  called if one or more
+%   goal handles can be discarded. We reclaim   the  goal from our known
+%   goals, which also removes the  last   reference  to the goal handle,
+%   leaving the destruction to the garbage collector.
+
+expire_goals(Server) :-
+    predicate_property(goal(_,_,_,_), number_of_clauses(Max)),
+    (   Max > 0
+    ->  ros:ros_action_expire_goals(Server, Max, Expired),
+        maplist(reclaim_goal, Expired)
+    ;   true
+    ).
+
+reclaim_goal(GoalInfo) :-
+    retractall(goal(_,_,GoalInfo.goal_id,_)).
 
 %!  ros_action_feedback(+Message) is det.
 %
