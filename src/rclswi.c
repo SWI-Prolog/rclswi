@@ -4003,6 +4003,44 @@ out:
 		 *******************************/
 
 static foreign_t
+ros_nodes(term_t Node, term_t Nodes)
+{ rclswi_node_t *node;
+  int rc = TRUE;
+  rcutils_string_array_t names = rcutils_get_zero_initialized_string_array();
+  rcutils_string_array_t namespaces = rcutils_get_zero_initialized_string_array();
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) )
+    return FALSE;
+
+  TRY(rcl_get_node_names(&node->node, rclswi_default_allocator,
+			 &names, &namespaces));
+  if ( rc )
+  { term_t List = PL_new_term_ref();
+    term_t Head = PL_new_term_ref();
+    term_t Values = PL_new_term_refs(2);
+    const atom_t keys[] = { ATOM_name, ATOM_namespace };
+
+
+    PL_put_nil(List);
+    for(ssize_t i = names.size; --i >= 0; )
+    { if ( !( put_utf8_string(Values+0, names.data[i]) &&
+	      put_utf8_string(Values+1, namespaces.data[i]) &&
+	      PL_put_dict(Head, ATOM_node, 2, keys, Values) &&
+	      PL_cons_list(List, Head, List) ) )
+	OUTFAIL;
+    }
+    rc = PL_unify(Nodes, List);
+  }
+
+out:
+  TRY_ANYWAY(rcutils_string_array_fini(&names));
+  TRY_ANYWAY(rcutils_string_array_fini(&namespaces));
+
+  return rc;
+}
+
+
+static foreign_t
 ros_topic_names_and_types(term_t Node, term_t NamesAndTypes)
 { rclswi_node_t *node;
   int rc = TRUE;
@@ -4013,6 +4051,68 @@ ros_topic_names_and_types(term_t Node, term_t NamesAndTypes)
   rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
   TRY(rcl_get_topic_names_and_types(&node->node,
 				    &rclswi_default_allocator, FALSE, &nat));
+
+  if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
+    OUTFAIL;
+
+out:
+  rc = rclswi_names_and_types_fini(&nat) && rc;
+  return rc;
+}
+
+
+static foreign_t
+ros_subscriber_names_and_types(term_t Node,
+			       term_t NodeName, term_t NameSpace,
+			       term_t NoDemangle,
+			       term_t NamesAndTypes)
+{ rclswi_node_t *node;
+  char *node_name;
+  char *namespace;
+  rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
+  int rc = TRUE;
+  int no_demangle;
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) ||
+       !get_utf8_name_ex(NodeName, &node_name) ||
+       !get_utf8_name_ex(NameSpace, &namespace) ||
+       !PL_get_bool_ex(NoDemangle, &no_demangle) )
+    return FALSE;
+
+  TRY(rcl_get_subscriber_names_and_types_by_node(
+	  &node->node, &rclswi_default_allocator, no_demangle, node_name, namespace,
+	  &nat));
+
+  if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
+    OUTFAIL;
+
+out:
+  rc = rclswi_names_and_types_fini(&nat) && rc;
+  return rc;
+}
+
+
+static foreign_t
+ros_publisher_names_and_types(term_t Node,
+			      term_t NodeName, term_t NameSpace,
+			      term_t NoDemangle,
+			      term_t NamesAndTypes)
+{ rclswi_node_t *node;
+  char *node_name;
+  char *namespace;
+  rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
+  int rc = TRUE;
+  int no_demangle;
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) ||
+       !get_utf8_name_ex(NodeName, &node_name) ||
+       !get_utf8_name_ex(NameSpace, &namespace) ||
+       !PL_get_bool_ex(NoDemangle, &no_demangle) )
+    return FALSE;
+
+  TRY(rcl_get_publisher_names_and_types_by_node(
+	  &node->node, &rclswi_default_allocator, no_demangle, node_name, namespace,
+	  &nat));
 
   if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
     OUTFAIL;
@@ -4314,6 +4414,11 @@ install_librclswi(void)
   PRED("ros_identifier_prolog",	      2, ros_identifier_prolog,	      0);
 
   PRED("ros_service_info_to_prolog",  2, ros_service_info_to_prolog,  0);
+  PRED("ros_nodes",		      2, ros_nodes,		      0);
+  PRED("ros_subscriber_names_and_types", 5,
+       ros_subscriber_names_and_types, 0);
+  PRED("ros_publisher_names_and_types", 5,
+       ros_publisher_names_and_types, 0);
   PRED("ros_topic_names_and_types",   2, ros_topic_names_and_types,   0);
   PRED("ros_client_names_and_types",  4, ros_client_names_and_types,  0);
   PRED("ros_service_names_and_types", 4, ros_service_names_and_types, 0);
