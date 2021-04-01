@@ -2,17 +2,8 @@
 
 __WARNING__
 
-> This is work in progress. Currently it handles
->
->   - The publish/subscribe API
->   - The logging API.
->   - The services API (client and service).
->   - The parameter API (declare, get/set, publish and services)
->   - Most of the low-level action API and work on a more high
->     level API for action clients.
->
-> We plan to turn this into a full   client. If you want to help, please
-> have a look at the TODO list at the end of this README.
+> This is work in progress. The current library is a fairly complete
+> ROS2 client library.  The interfaces are not completely settled.
 
 ## Building
 
@@ -20,15 +11,15 @@ __WARNING__
  - clone into `src` below your ROS2 workspace
  - Build using `colcon build`
 
-## Running the demo
+## Running the demos
 
-From your ROS2 workspace, assuming default directory structure
+The directory `rclswi/examples` contains several small test programs and
+examples. To run any  of  these,   from  your  ROS2  workspace, assuming
+default directory structure
 
     swipl -p library=install/rclswi/prolog src/rclswi/examples/demo.pl
 
-See the `demo.pl` file for details.   The  `examples` directory contains
-several  examples.  Some  (still)   rely    on   non-standard  interface
-definitions.
+See the file content for details.
 
 
 ## Design
@@ -43,7 +34,7 @@ layer on top of them  that  provide   functionality  that  is similar to
 Python _Capsules_.   This results in e.g.
 
     ?- ros_default_context(X).
-    X = <rcl_context_t>(0x560482bf2180).
+    X = <ros_context>(0x560482bf2180).
 
 These pointers are subject to  (atom)   garbage  collection.  Whenever a
 pointer is garbage collected a C  finialization function is called. This
@@ -61,7 +52,7 @@ messages of the  requested  type  and   functions  to  access  the  type
 introspection information.  For example:
 
     ?- ros:ros_type_support('geometry_msgs/msg/Twist', TypeSupport).
-    TypeSupport = <rclswi_message_type_t>(0x55886a3fa3c0).
+    TypeSupport = <ros_message_type>(0x55886a3fa3c0).
 
 The message information is need for registering with topics and services
 and stored along with the subscription and similar object. This provides
@@ -69,11 +60,16 @@ the simple interface:
 
     ros_take(+Subscription, -Message, -MessageInfo)
 
+The interface provides a  systematic  translation   from  the  ROS  type
+introspection data to Prolog. Typically, ROS   names use _CamelCase_. As
+this conflicts with Prolog variable  naming   as  consistent  mapping is
+applied. The mapping is available   through ros_identifier_prolog/2 from
+library(ros/types).
+
 The mapping from ROS types to Prolog types is defined as:
 
-  - ``ROS_TYPE_MESSAGE`` is translated into a SWI-Prolog dict.  The
-    keys are the downcased version of the member names and the _tag_
-    is the downcased version of the `message_name_`.
+  - ``ROS_TYPE_MESSAGE`` is translated into a SWI-Prolog dict.  Type and
+    field names are translated according to the above notice.
   - All ROS floating point numbers are represented as SWI-Prolog floats,
     which currently maps to a C double.  This implies that `long double`
     looses precision.
@@ -83,7 +79,8 @@ The mapping from ROS types to Prolog types is defined as:
   - ``ROS_TYPE_BOOLEAN`` is converted into `true` or `false`.
   - ``ROS_TYPE_STRING`` is converted into a SWI-Prolog string.
 
-__Type introspection__ allows us to describe a type in Prolog
+__Type introspection__ allows us to describe a type in Prolog.  The following
+is available from library(ros/types):
 
     ?- ros_type_introspection('geometry_msgs/msg/Twist', D),
        print_term(D, []).
@@ -93,12 +90,12 @@ __Type introspection__ allows us to describe a type in Prolog
     D = ...
 
 
-## Spinning
+### Spinning
 
-At this moment, ros_wait/3 takes a list   of waitable objects and waits,
-optionally with a timeout, for any  of   these  objects to become ready,
-returning a list of ready objects. There   is  no Prolog reprentation of
-ROS wait sets.
+At the lowest level, spinning is based  on ros_wait/3 which takes a list
+of waitable objects and waits, optionally  with   a  timeout, for any of
+these objects to become ready, returning a list of ready objects.
+
 
 ## High level API
 
@@ -176,18 +173,19 @@ type introspection.  Missing:
 	- [x] Synchronous calls
 	- [ ] ASynchronous calls
       - [ ] Service
-	- [ ] Read/compute/reply loop
+	- [x] Read/compute/reply loop
 	- [ ] Read/compute/reply loop using multiple threads
-	- [ ] Callback based
+	- [x] Callback based
   - [ ] Deal with actions
     - [x] Action type introspection
     - [x] Low level interface for creating an action client or server
     - [x] Receiving feedback and status
     - [x] Access to the goals, results and cancel services
-    - [ ] QoS support
+    - [x] QoS support
     - [ ] High level action API
       - [x] DCG based action client
-      - [ ] action server
+      - [ ] Callback based client
+      - [x] action server
   - [ ] Deal with clocks
     - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
