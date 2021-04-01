@@ -26,9 +26,10 @@
 :- use_module(library(ros/detail/options)).
 :- use_module(library(ros/detail/actions)).
 
-:- use_module(library(error)).
 :- use_module(library(option)).
 :- use_module(library(debug)).
+:- use_module(library(apply)).
+:- use_module(library(lists)).
 
 :- meta_predicate
     ros_action_server(+,+,2,-,+),
@@ -274,8 +275,35 @@ answer_result_request_(Status, Server, _Thread, Info) =>
 
 cancel_goals(Server, GoalInfo, MsgInfo) :-
     GoalID = GoalInfo.goal_id,
-    GoalID \== '000',
-    !,
+    time_msg_stamp(GoalInfo.stamp, Time),
+    cancel_goals(Server, GoalID, Time, Response),
+    ros:ros_action_send_cancel_response(Server, Response, MsgInfo).
+
+cancel_goals(Server, '00000000-0000-0000-0000-000000000000', 0, Response) =>
+    Before is 1<<63,
+    cancel_goals_before(Server, Before, Response).
+cancel_goals(Server, '00000000-0000-0000-0000-000000000000', Time, Response) =>
+    cancel_goals_before(Server, Time, Response).
+cancel_goals(Server, GoalID, 0, Response) =>
+    cancel_goal(Server, GoalID, Response).
+cancel_goals(Server, GoalID, Time, Response) =>
+    cancel_goal(Server, GoalID, Response1),
+    cancel_goals_before(Server, Time, Response2),
+    join_cancel_response(Response1, Response2, Response).
+
+join_cancel_response(_{return_code:_, goals_canceling:[]}, Response2, Response) =>
+    Response = Response2.
+join_cancel_response(Response1, _{return_code:_, goals_canceling:[]}, Response) =>
+    Response = Response1.
+join_cancel_response(_{return_code:_, goals_canceling:Cancelling1},
+                     _{return_code:_, goals_canceling:Cancelling2}, Response) =>
+    cancel_enum(StatusCode, none),
+    append(Cancelling1, Cancelling2, Cancelling3),
+    sort(Cancelling3, Cancelling),
+    Response = _{return_code:StatusCode, goals_canceling:Cancelling}.
+
+
+cancel_goal(Server, GoalID, Response) :-
     (   goal(Server, Handle, GoalID, Thread)
     ->  cancel_goal(Thread, Status),
         cancel_enum(StatusCode, Status),
@@ -287,15 +315,43 @@ cancel_goals(Server, GoalInfo, MsgInfo) :-
     ;   cancel_enum(StatusCode, unknown_goal_id),
         Cancelling = []
     ),
-    ros:ros_action_send_cancel_response(
-            Server,
-            _{ return_code:StatusCode, goals_canceling:Cancelling},
-            MsgInfo).
+    Response = _{ return_code:StatusCode, goals_canceling:Cancelling}.
+
+cancel_goals_before(Server, Time, Response) :-
+    findall(Cancel, cancel_goal_before(Server, Time, Cancel), Cancelling),
+    cancel_enum(StatusCode, none),
+    Response = _{ return_code:StatusCode, goals_canceling:Cancelling}.
+
+cancel_goal_before(Server, Time, Info) :-
+    goal(Server, Handle, _GoalID, Thread),
+    ros_goal_handle_property(Handle, info(Info)),
+    time_msg_stamp(Info.stamp, Start),
+    Start =< Time,
+    cancel_goal(Thread, _Status).
+
+%!  time_msg_stamp(?MsgTime, ?Stamp) is det.
+%
+%   Translate between time as represented in   a  message and the Prolog
+%   representation as a float. The second   clause  anticipates on doing
+%   this translation in the core message type translation.
+
+time_msg_stamp(_{nanosec:NSec, sec:Sec}, Stamp) :-
+    !,
+    (   var(Stamp)
+    ->  Stamp is Sec+NSec/1_000_000_000
+    ;   Sec is floor(Stamp),
+        NSec is round((Stamp-Sec)*1_000_000_000)
+    ).
+time_msg_stamp(Stamp, Stamp).
 
 cancel_enum(0, none).
 cancel_enum(1, rejected).
 cancel_enum(1, unknown_goal_id).
 cancel_enum(1, goal_terminated).
+
+%!  cancel_goal(+Thread, -Status)
+%
+%   Cancel the goal that is executed by Thread.
 
 cancel_goal(Thread, Status) :-
     E = error(_,_),
