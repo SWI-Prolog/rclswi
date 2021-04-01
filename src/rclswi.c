@@ -4022,6 +4022,7 @@ out:
   return rc;
 }
 
+
 static foreign_t
 ros_client_names_and_types(term_t Node,
 			   term_t NodeName, term_t NameSpace,
@@ -4077,6 +4078,60 @@ out:
 }
 
 
+static foreign_t
+ros_action_client_names_and_types(term_t Node,
+				  term_t NodeName, term_t NameSpace,
+				  term_t NamesAndTypes)
+{ rclswi_node_t *node;
+  char *node_name;
+  char *namespace;
+  rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
+  int rc = TRUE;
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) ||
+       !get_utf8_name_ex(NodeName, &node_name) ||
+       !get_utf8_name_ex(NameSpace, &namespace) )
+    return FALSE;
+
+  TRY(rcl_action_get_client_names_and_types_by_node(
+	  &node->node, &rclswi_default_allocator, node_name, namespace,
+	  &nat));
+
+  if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
+    OUTFAIL;
+
+out:
+  rc = rclswi_names_and_types_fini(&nat) && rc;
+  return rc;
+}
+
+
+static foreign_t
+ros_action_server_names_and_types(term_t Node,
+				  term_t NodeName, term_t NameSpace,
+				  term_t NamesAndTypes)
+{ rclswi_node_t *node;
+  char *node_name;
+  char *namespace;
+  rcl_names_and_types_t nat = rcl_get_zero_initialized_names_and_types();
+  int rc = TRUE;
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) ||
+       !get_utf8_name_ex(NodeName, &node_name) ||
+       !get_utf8_name_ex(NameSpace, &namespace) )
+    return FALSE;
+
+  TRY(rcl_action_get_server_names_and_types_by_node(
+	  &node->node, &rclswi_default_allocator, node_name, namespace,
+	  &nat));
+
+  if ( rc && !unify_rcl_names_and_types(NamesAndTypes, &nat) )
+    OUTFAIL;
+
+out:
+  rc = rclswi_names_and_types_fini(&nat) && rc;
+  return rc;
+}
 
 
 
@@ -4262,6 +4317,10 @@ install_librclswi(void)
   PRED("ros_topic_names_and_types",   2, ros_topic_names_and_types,   0);
   PRED("ros_client_names_and_types",  4, ros_client_names_and_types,  0);
   PRED("ros_service_names_and_types", 4, ros_service_names_and_types, 0);
+  PRED("ros_action_client_names_and_types", 4,
+       ros_action_client_names_and_types, 0);
+  PRED("ros_action_server_names_and_types", 4,
+       ros_action_server_names_and_types, 0);
 
 					/* install helpers */
   install_ros_logging();
