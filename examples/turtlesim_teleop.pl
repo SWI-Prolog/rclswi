@@ -113,21 +113,35 @@ teleop_raw(C) =>
 %!  echo//
 %
 %   This is the DCG (Grammar) called  by ros_action_run/4 to monitor the
-%   ongoing goal. In this case we watch  for   the  'F' key to cancel by
-%   making the grammar fail.  Otherwise  we   simple  echo  the event we
-%   received.
+%   ongoing goal. This grammar  simply  prints   the  events.  The first
+%   clause checks for the user pressing  the   'F'  key. When pressed it
+%   cancels the action. There are two ways to do so:
+%
+%     - Make the grammar fail or raise an exception.  In that case
+%       ros_action_run/4 sends a cancel requests and discards subsequent
+%       messages.
+%     - Call ros_cancel_action/0. In that case we keep receiving
+%       messages until status(canceled) is received.  Note that we may
+%       or may not get `canceling`, signalling that the server accepted
+%       our request and the two events may be in either order.
 
 echo -->
     [feedback(_)],
     { poll_char(f, 0),
       !,
       format('~NTyped F.  Cancelling ...~n'),
-      fail
-    }.
+      ros_cancel_action
+    },
+    echo.
+echo -->
+    [feedback(Msg)],
+    !,
+    { format(user_error, '\r\e[2KFeedback ~p', [Msg]) },
+    echo.
 echo -->
     [Msg],
     !,
-    { format(user_error, '\r\e[2KGot ~p', [Msg]) },
+    { format(user_error, '~NGot ~p~n', [Msg]) },
     echo.
 echo -->
     [].
