@@ -7,7 +7,7 @@ __WARNING__
 
 ## Building
 
- - Make sure to have SWI-Prolog installed (8.3.19 or later)
+ - Make sure to have SWI-Prolog installed (8.3.22 or later)
  - clone into `src` below your ROS2 workspace
  - Build using `colcon build`
 
@@ -157,9 +157,12 @@ type introspection.  Missing:
     - [x] Publish changes on `/parameter_events`
     - [x] Provide a callback on parameter changes
     - [x] Enumerate, get and set parameters on named nodes
-  - [ ] Graph tracking
-    - [ ] Query the ROS node graph (partially implemented)
-    - [ ] Monitor changes (manage the graph in the Prolog db)
+  - [x] Graph tracking
+    - [x] Query the ROS node graph
+      - [x] Enumerate nodes
+      - [x] Enumerate topics and types
+      - [x] Enumerate services and types
+      - [x] Enumerate actions and types
   - [ ] Deal with logging
     - [x] configure and generate ROS log messages
     - [x] Bridge from SWI-Prolog `print_message/2` and `debug/3`
@@ -199,14 +202,15 @@ type introspection.  Missing:
       - [ ] Find the right SWI-Prolog
       - [ ] Use `rclutils` to get some portable alternatives
     - [ ] Allow running a ROS node interactively from Prolog
-      -	Make installation follow the SWI-Prolog _pack_
-        structure so we can attach the ROS API as a pack.
+      -	[ ] Make installation follow the SWI-Prolog _pack_
+            structure so we can attach the ROS API as a pack.
     - [ ] Allow deploying a ROS node using `ros2 run`
       - [ ] How to do that?
-      - [ ] Pass command line options into `rcl_init()` and `rcl_node_init()`
+      - [x] Pass command line options into `rcl_init()` and `rcl_node_init()`
       - [ ] Provide a skeleton project
+    - [ ] Query the `share` directory of a package
   - [ ] Process cleanup
-    - [ ] Properly handle signals asynchronously (Control-C)
+    - [x] Properly handle signals asynchronously (Control-C)
     - [ ] Finish and reclaim resources in the right order.
   - [ ] Documentation
   - [ ] Testing
