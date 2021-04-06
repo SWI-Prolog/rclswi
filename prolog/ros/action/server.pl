@@ -58,32 +58,16 @@ these phases:
     - Respond that no goal matches the request
     - Reject the request.
 
-We identify two action service scenarios.
-
-## Single threaded
-
-A server is handled in the current   thread.  The server thread needs to
-poll for requests. This may either  be implemented using an asynchronous
-timer or by synchronously polling.
-
-## Multi threaded
-
-One thread manages the action server  handle, listening for requests. If
-a goal is accepted a new thread is   created that runs the goal. In this
-scenario the actions are handled using ros_spin/1.
-
-## The action goal
+Currently, an action server  is   registered  using ros_action_server/5.
+This  server  is  associated  with   this    node   for  spinning  using
+ros_action_spin/1.  The  spinner  thread  accepts  action  requests.  It
+creates a new thread for running an action goal.
 
 The action goal is a normal Prolog goal  that executes the action. If it
-wants to send feedback it may call ros_action_publish_feedback/1 using a
-message that matches the feedback type for the registered action. If the
-action runs in cooperative mode it may call ros_action_poll/1. Otherwise
-it must be prepared to handle the exception ros_action(Request).
-
-Info we need on an action server:
-
-  - Max # goals in progress
-  - Goal closure
+wants to send feedback it may call ros_action_feedback/1 using a message
+that matches the feedback type  for   the  registered action. The action
+goal must be prepared to handle   the exception ros_action(Request) that
+is injected into the goal using thread_signal/2.
 */
 
 %!  ros_action_server(+ActionName, +ActionType, :Goal,

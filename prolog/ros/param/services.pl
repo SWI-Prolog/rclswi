@@ -32,7 +32,11 @@ nodes to read and write the parameters of our node.
 
 %!  ros_param_services(+Options) is det.
 %
-%   Create the parameter services for a given node.
+%   Create the parameter services for a   given  node. This predicate is
+%   normally not used directly by the user. If parameters are associated
+%   to a node  in  ros_set_defaults/1,   the  node  initialization  will
+%   initialize these parameters  from  the   environment  and  start the
+%   parameter services using this predicate.
 
 ros_param_services(Options) :-
     node_from_options(Node, Options),

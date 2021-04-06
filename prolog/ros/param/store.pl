@@ -42,6 +42,14 @@ This module implements the node parameter   declarations and storage. It
 deals  with  storing  parameters,   populating    parameters   from  the
 commandline and node arguments, setting   and  getting parameter values.
 Changes to parameter values are published on `/parameter_events`
+
+The typical application will use ros_set_defaults/1   to declare the ROS
+parameters  for  the  (default)  node.  The  application  normally  uses
+ros_get_param/2 to fetch the value of a parameter.
+
+(External) changes to the parameters  are   made  available  as _events_
+using       broadcast/1       from         library(broadcast).       See
+ros_publish_parameter_events/1 and the examples for details.
 */
 
 :- dynamic

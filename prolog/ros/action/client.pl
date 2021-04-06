@@ -40,6 +40,9 @@ This module provides a high level interface  for ROS action clients. The
 current version deals with a single ongoing   action on a client object.
 The client code monitors the progress of  the client using a _lazy list_
 of events.
+
+@tbd Currently only deals with a single  active client on a specific ROS
+action.
 */
 
 
