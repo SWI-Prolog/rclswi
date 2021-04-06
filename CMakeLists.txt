@@ -24,6 +24,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rcl REQUIRED)
 find_package(rcl_action REQUIRED)
 find_package(rcl_yaml_param_parser REQUIRED)
@@ -44,6 +45,7 @@ add_library(rclswi SHARED
   src/logging.c
   src/pointer.c
   src/qos.c
+  src/rclswi-cpp.cpp
 )
 target_link_libraries(rclswi
   SWIPL::LIBSWIPL
@@ -56,6 +58,7 @@ ament_target_dependencies(rclswi
   "rcl"
   "rmw"
   "rcl_action"
+  "ament_index_cpp"
 )
 
 # Causes the visibility macros to use dllexport rather than dllimport,

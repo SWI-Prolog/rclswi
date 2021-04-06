@@ -832,3 +832,13 @@ ros_object(Object, Type) :-
 
 ros_property(rmw_identifier(Id)) :-
     ros_rwm_implementation(Id).
+
+
+%!  ros_package_share_directory(+Package:text, -Dir:atom) is det.
+%
+%   True when Dir is  the  name  of   the  directory  where  Package  is
+%   installed.
+%
+%   @see Based on ``ament_index_cpp::get_package_share_directory()``
+%   @error existence_error(ros_package, Package)
+%   @bug Currently only handles ISO-Latin-1 package names.
