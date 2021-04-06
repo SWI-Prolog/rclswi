@@ -208,7 +208,7 @@ type introspection.  Missing:
       - [ ] How to do that?
       - [x] Pass command line options into `rcl_init()` and `rcl_node_init()`
       - [ ] Provide a skeleton project
-    - [ ] Query the `share` directory of a package
+    - [x] Query the `share` directory of a package
   - [ ] Process cleanup
     - [x] Properly handle signals asynchronously (Control-C)
     - [ ] Finish and reclaim resources in the right order.
