@@ -146,7 +146,7 @@ The current version is a proof of   concept.  It demonstrates we can use
 type introspection.  Missing:
 
   - [ ] Type handling
-    - [ ] Convert message from C to Prolog
+    - [x] Convert message from C to Prolog
       - [x] Deal with arrays
         - [x] Fixed arrays
 	- [x] Dynamic arrays
@@ -183,12 +183,11 @@ type introspection.  Missing:
 	  client and service.
     - [ ] High level interface.
       - [ ] Client
-	- [x] Synchronous calls
-	- [ ] ASynchronous calls
-      - [ ] Service
-	- [x] Read/compute/reply loop
-	- [ ] Read/compute/reply loop using multiple threads
-	- [x] Callback based
+        - [x] Synchronous calls
+        - [ ] ASynchronous calls
+      - [x] Service
+        - [x] Read/compute/reply loop
+        - [x] Callback based
   - [ ] Deal with actions
     - [x] Action type introspection
     - [x] Low level interface for creating an action client or server
@@ -204,8 +203,6 @@ type introspection.  Missing:
   - [ ] Deal with timers
   - [ ] Advanced configuration
     - [x] Provide access to the QoS policies
-  - [ ] Threads (Executors)
-    - [ ] Thread-per-node model?
   - [ ] ROS2 Lifecycle support?
   - [ ] Integration into ROS deployment
     - [ ] Build, portability
