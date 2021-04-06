@@ -35,7 +35,7 @@ servers.
 
 ros_create_clock(Type, Clock) :-
     ros_default_context(Context),
-    ros_create_clock(Context, Type, Clock).
+    ros:ros_create_clock(Context, Type, Clock).
 
 %!  ros_clock_property(+Clock, ?Property) is nondet.
 %
@@ -52,9 +52,9 @@ ros_clock_property(Clock, Property) :-
     ros_clock_prop(Property, Clock).
 
 ros_clock_prop(context(Context), Clock) :-
-    '$ros_clock_prop'(Clock, type, Context).
+    ros:'$ros_clock_prop'(Clock, type, Context).
 ros_clock_prop(type(Type), Clock) :-
-    '$ros_clock_prop'(Clock, type, Type).
+    ros:'$ros_clock_prop'(Clock, type, Type).
 ros_clock_prop(time(Time), Clock) :-
     ros_clock_time(Clock, Time).
 
@@ -62,3 +62,5 @@ ros_clock_prop(time(Time), Clock) :-
 %
 %   Get the time of Clock as a floating point time stamp.
 
+ros_clock_time(Clock, Stamp) :-
+    ros:ros_clock_time(Clock, Stamp).

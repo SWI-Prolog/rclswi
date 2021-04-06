@@ -21,6 +21,16 @@ default directory structure
 
 See the file content for details.
 
+## Documentation
+
+The library is documented using PlDoc. To   view  the documentation in a
+browser run (same as above, adding ``--pldoc``).
+
+    swipl --pldoc -p library=install/rclswi/prolog src/rclswi/examples/demo.pl
+
+Use the directory menu on  the   top-left  to select the `rclswi/prolog`
+directory or one of its subdirectories.
+
 
 ## Design
 
@@ -213,5 +223,7 @@ type introspection.  Missing:
     - [x] Properly handle signals asynchronously (Control-C)
     - [ ] Finish and reclaim resources in the right order.
   - [ ] Documentation
+    - [x] In code documentation
+    - [ ] Generate a stand-alone document
   - [ ] Testing
   - [ ] Performance evaluation

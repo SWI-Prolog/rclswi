@@ -31,16 +31,14 @@
 
             ros_wait/3,                 % +WaitSet, +TimeOut, -Ready
 
-            ros_take/3,			% +Subscription, -Message, -MessageInfo
-
             ros_property/1,             % ?Property
-            ros_debug/1,                % +Level
             ros_default_context/1,      % -Context
             ros_default_node/1,         % -Node
             ros_node/2,                 % +Alias, -Node
 
             ros_object/2,               % ?Object, ?Type
-            ros_synchronized/2          % +Object, :Goal
+            ros_synchronized/2,         % +Object, :Goal
+            ros_debug/1                 % +Level
           ]).
 :- autoload(library(error),
             [ must_be/2,
@@ -81,7 +79,8 @@
                        qos_profile(any)
                      ]).
 :- predicate_options(ros_publish/3, 3,
-                     [ node(any)
+                     [ node(any),
+                       pass_to(ros_publisher/2, 2)
                      ]).
 
 
@@ -107,7 +106,35 @@ user:file_search_path(foreign, LibDir) :-
 This module provides a ROS2 client   library for SWI-Prolog. The library
 builds on top of the ROS2 low-level C libraries `rcl` and `rmw` and uses
 type introspection to dynamically translate  ROS2 messages to SWI-Prolog
-dict objects.
+dict objects. Because most applications need   only  part of this client
+and/or server functionality, the ROS2  library   is  split into many sub
+libraries:
+
+  | Library      | Summary |
+  |---|---|
+  | library(ros) | This library |
+  | library(ros/logging) | Send ROS log messages |
+  | library(ros/graph) | Query nodes, topics, services and actions |
+  | library(ros/types) | Query message types associated with topics, services and actions |
+  | library(ros/qos) | Create and manage Quality of Service descriptions |
+  | library(ros/clocks) | Deal with ROS clocks |
+  | library(ros/services) | Client and server side for ROS services |
+  | library(ros/param/client) | Read and set parameters in other nodes |
+  | library(ros/param/store) | Access parameters of this node |
+  | library(ros/param/services) | Provide remote access to our parameters |
+  | library(ros/action/client) | Create and monitor a goal on an action server |
+  | library(ros/action/server) | Create an action server |
+
+This documentation does not provide an  overview on how these predicates
+can be combined to build a ROS node.  For now we refer to the `examples`
+directory in the `rclswi` source package.
+
+__WARNING__
+
+> The API should not be considered fully stable.  Changes that affect users
+> will be tagged as __MODIFIED:__ in the Git commit log.
+> If you decide to try this library, please discuss its usage, either on
+> the ROS forum or on the [SWI-Prolog forum](https://swi-prolog.discourse.group/)
 */
 
 type_support_function_prefix(msg,
@@ -178,7 +205,7 @@ ros_unsubscribe(Topic) :-
 %!  ros_publish(+Topic, +Message, +Options) is det.
 %
 %   Send a message to Topic. If no  publisher exists it it created based
-%   on Options. Other options processed:
+%   on Options passed to ros_publisher/2. Other options processed:
 %
 %     - node(+Node)
 %       Specify the node.  When omitted the first node for which
@@ -657,6 +684,13 @@ ros_subscribe(Node, MsgType, Topic, QoSProfile, Subscription) :-
     ros_msg_type_support(MsgType, TypeSupport),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription).
 
+%!  ros_take(+Subscription, -Message, -MsgInfo) is det.
+%
+%   Read Message from Subscription (to a topic). The caller should first
+%   use ros_wait/3 on Subscription to wait   for a message. Messages are
+%   normally dealt with using a callback from ros_spin/1.
+
+
 %!  ros_wait(+Objects, +Timeout, -Ready) is semidet.
 %
 %   Wait for any of the resources in  Objects to become ready and return
@@ -842,3 +876,10 @@ ros_property(rmw_identifier(Id)) :-
 %   @see Based on ``ament_index_cpp::get_package_share_directory()``
 %   @error existence_error(ros_package, Package)
 %   @bug Currently only handles ISO-Latin-1 package names.
+
+
+%!  ros_debug(+Level)
+%
+%   Print low level debug messages to   the  console. See ``DEBUG(Level,
+%   Code)`` calls in the C source `src/rclswi.c`. Notably level 10 shows
+%   all calls to the `rcl` library and their results.

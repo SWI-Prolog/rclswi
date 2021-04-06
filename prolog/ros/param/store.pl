@@ -85,6 +85,9 @@ Changes to parameter values are published on `/parameter_events`
 %     - publish(+Bool)
 %       When `false` (default `true`), do not generate a parameter
 %       event.
+%
+%   Normally parameters are  declared  with   the  (default)  node using
+%   ros_set_defaults/1.
 
 ros_parameter(Name, Options) :-
     node_from_options(Node, Options),

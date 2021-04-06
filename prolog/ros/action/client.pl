@@ -163,7 +163,7 @@ ros_action_run(ActionName, Goal, Grammar, Options) :-
                            final:false
                          },
     lazy_list(action_state(State), Responses),
-    (   with_context(phrase(Grammar, Responses), State, Left)
+    (   with_context(phrase(Grammar, Responses, Left), State)
     ->  debug(ros(action), 'Grammar left: ~p', [Left])
     ;   ros_cancel_action(State, Options)
     ).
