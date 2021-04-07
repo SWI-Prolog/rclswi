@@ -40,7 +40,10 @@ ros_current_node(NodeName) :-
     ros_default_node(Node),
     ros:ros_nodes(Node, Visible),
     member(_{name:Name, namespace:Namespace}, Visible),
-    atom_concat(Namespace, Name, NodeName).
+    (   sub_atom(Namespace, _, _, 0, /)
+    ->  atom_concat(Namespace, Name, NodeName)
+    ;   atomic_list_concat([Namespace, /, Name], NodeName)
+    ).
 
 %!  ros_current_topic(?Topic, ?Type) is nondet.
 %
@@ -51,7 +54,7 @@ ros_current_topic(Topic, Type) :-
     ros:ros_topic_names_and_types(Node, TopicsAndTypes),
     member(Topic-[Type], TopicsAndTypes).
 
-%!  ros_node_interface(+NodeName, ?Kind, ?ClientServer, ?Path, ?Type) is nondet.
+%!  ros_node_interface(?NodeName, ?Kind, ?ClientServer, ?Path, ?Type) is nondet.
 %
 %   True when the named node implements  the requested service or action
 %   client or server. Note that these predicates   operate  on a node in
@@ -70,6 +73,10 @@ ros_current_topic(Topic, Type) :-
 %   @arg ClientServer is one of `client` or `server`
 
 ros_node_interface(NodePath, Kind, ClientServer, Path, Type) :-
+    (   var(NodePath)
+    ->  ros_current_node(NodePath)
+    ;   true
+    ),
     node_path_name_domain(NodePath, NodeName, NameSpace),
     ros_default_node(Node),
     node_interface(Kind, ClientServer, Node, NodeName, NameSpace, NamesAndTypes),
@@ -89,9 +96,5 @@ node_interface(action, server, Node, NodeName, NameSpace, NamesAndTypes) :-
     ros:ros_action_server_names_and_types(Node, NodeName, NameSpace, NamesAndTypes).
 
 node_path_name_domain(Path, NodeName, NameSpace) :-
-    atomic_list_concat([''|Parts], '/', Path),
-    (   Parts = [NodeName, NameSpace]
-    ->  true
-    ;   Parts = [NodeName],
-        NameSpace = ''
-    ).
+    file_base_name(Path, NodeName),
+    file_directory_name(Path, NameSpace).
