@@ -2,10 +2,27 @@
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Load all the ROS Prolog libraries. This is   nice  for using all the ROS
-predicates interactively or browse the documentation by running
+predicates interactively. Load using the   command below. Optionally add
+``--port=Number``  _at  the  end_.  ``--no-doc``   does  not  start  the
+documentation server.
 
-    swipl --pldoc -p library=install/rclswi/prolog src/rclswi/examples/all.pl
+    swipl -p library=install/rclswi/prolog src/rclswi/examples/all.pl
+
+Surf to http://localhost:8080 to view the documentation.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+:- doc_collect(true).
+:- initialization(doc_server_and_toplevel, main).
+
+doc_server_and_toplevel :-
+    current_prolog_flag(argv, Argv),
+    argv_options(Argv, _, Options),
+    (   option(doc(true), Options, true)
+    ->  option(port(Port), Options, 8080),
+        doc_server(Port)
+    ;   true
+    ),
+    set_prolog_flag(toplevel_goal, prolog).
 
 :- use_module(library(ros)).
 :- use_module(library(ros/clocks)).
