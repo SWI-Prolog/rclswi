@@ -24,12 +24,16 @@ See the file content for details.
 ## Documentation
 
 The library is documented using PlDoc. To   view  the documentation in a
-browser run (same as above, adding ``--pldoc``).
+browser  run  the  command  below   to    create   an   HTTP  server  at
+http://localhost:8080.
 
-    swipl --pldoc -p library=install/rclswi/prolog src/rclswi/examples/all.pl
+    swipl -p library=install/rclswi/prolog src/rclswi/examples/doc.pl [option ...]
+
+Options processed are ``--port=Port`` to select  an alternative port and
+``--no-doc`` to just load the code without starting a web server.
 
 Use the directory menu on  the   top-left  to select the `rclswi/prolog`
-directory or one of its subdirectories.
+directory and select `ros.pl`.
 
 
 ## Design
