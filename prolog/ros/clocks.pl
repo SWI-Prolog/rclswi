@@ -15,7 +15,7 @@
 
 :- module(ros_clocks,
           [ ros_create_clock/2,     % +Type, -Clock,
-            ros_clock_time/2,       % +Clock, -Type
+            ros_clock_time/2,       % +Clock, -Time
             ros_clock_property/2    % +Clock, ?Property
           ]).
 :- use_module(library(ros)).
