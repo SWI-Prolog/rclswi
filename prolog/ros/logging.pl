@@ -28,8 +28,9 @@
 
 This library allows controlling the ROS   logging  system. The predicate
 ros_log/3 is used to send  ROS   log  messages immediately. This library
-also hooks SWI-Prolog print_message/2, redirecting  relevant messages to
-the ROS logging system.
+also  hooks  SWI-Prolog  print_message/2.   If    the   session  is  not
+interactive, SWI-Prolog messages  are  redirected   to  the  ROS logging
+system.
 */
 
 %!  ros_log(+Severity, +Format, +Args) is det.
@@ -116,6 +117,7 @@ ros_logger(Name) :-
     user:message_hook/3.
 
 user:message_hook(Term, Level, _Lines) :-
+    \+ current_prolog_flag(break_level, _), % Sesion is not interactive
     swi_ros_message_proxy(Level, ROSLevel),
     message_to_string(Term, String),
     (   source_location(File, Line)

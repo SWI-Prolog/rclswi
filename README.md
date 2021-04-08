@@ -173,10 +173,10 @@ type introspection.  Missing:
       - [x] Enumerate topics and types
       - [x] Enumerate services and types
       - [x] Enumerate actions and types
-  - [ ] Deal with logging
+  - [x] Deal with logging
     - [x] configure and generate ROS log messages
     - [x] Bridge from SWI-Prolog `print_message/2` and `debug/3`
-    - [ ] print_message/2 forwarding should only be to `/rosout`
+    - [x] print_message/2 is only forwarded for non-interactive sessions.
     - [ ] Defaults should depend on whether a session is interactive
   - [ ] Deal with services
     - [x] Low level interface: read/write request/response, wait for
