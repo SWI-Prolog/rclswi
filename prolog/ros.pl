@@ -17,6 +17,7 @@
           [ ros_set_defaults/1,         % +List
             ros_spin/0,
             ros_spin/1,                 % +Options
+            ros_spin_once/1,            % Options
             ros_shutdown/0,
 
             ros_subscribe/3,            % +Topic, :CallBack, +Options
@@ -67,6 +68,10 @@
 :- predicate_options(ros_spin/1, 1,
                      [ node(any),
                        thread(atom)
+                     ]).
+:- predicate_options(ros_spin_once/1, 1,
+                     [ node(any),
+                       timeout(any)
                      ]).
 :- predicate_options(ros_subscribe/3, 3,
                      [ node(any),
@@ -300,6 +305,23 @@ ros_node_spin(_).
 waitables_on(Node) :-
     waitable(_Type, Node, _Obj, _Callback),
     !.
+
+%!  ros_spin_once(+Options) is semidet.
+%
+%   Wait for all waitable objects  registered   with  Node  and call the
+%   callbacks associated with the ready objects.   Fails if there are no
+%   objects to wait for or TimeOut is exceeded.  Options:
+%
+%     - node(+Node)
+%       Node to operate on
+%     - timeout(+Seconds)
+%       Time to wait.  Either a number or `infinite`.  Default is
+%       0.1 seconds.
+
+ros_spin_once(Options) :-
+    node_from_options(Node, Options),
+    option(timeout(TimeOut), Options, 0.1),
+    ros_spin_once(Node, TimeOut).
 
 
 %!  ros_spin_once(+Node, +TimeOut) is semidet.
