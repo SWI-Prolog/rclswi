@@ -3539,8 +3539,10 @@ fill_static_struct_array(term_t List, void *array, size_t len,
   size_t elemsize = members->size_of_;
 
   for(size_t i=0; i < len; i++)
-  { if ( !PL_get_list(tail, head, tail) ||
-	 !fill_message(head, (char*)array + elemsize*i, ts, TRUE) )
+  { if ( !PL_get_list(tail, head, tail) )
+      return FALSE;
+    DEBUG(5, PL_write_term(Serror, head, 1200, PL_WRT_QUOTED|PL_WRT_NEWLINE));
+    if ( !fill_message(head, (char*)array + elemsize*i, ts, FALSE) )
       return FALSE;
   }
   return PL_get_nil(tail);
@@ -3554,9 +3556,11 @@ fill_dynamic_struct_array(term_t List, void *array, size_t len,
     term_t head = PL_new_term_ref();
 
     for(size_t i = 0; i < len; i++)
-    { if ( !PL_get_list(tail, head, tail) ||
-	   !fill_message(head, mem->get_function(array, i), mem->members_, TRUE) )
-      return FALSE;
+    { if ( !PL_get_list(tail, head, tail) )
+	return FALSE;
+      DEBUG(5, PL_write_term(Serror, head, 1200, PL_WRT_QUOTED|PL_WRT_NEWLINE));
+      if ( !fill_message(head, mem->get_function(array, i), mem->members_, FALSE) )
+	return FALSE;
     }
 
     return PL_get_nil(tail);
@@ -3611,9 +3615,15 @@ fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
 		= members->members_+i;
     atom_t key = lwr_atom(mem->name_);
 
+    DEBUG(5, Sdprintf("Fill %s ...", mem->name_));
+
     if ( PL_get_dict_key(key, Message, Value) )
-    { if ( mem->is_array_ && !noarray )
+    { DEBUG(5, Sdprintf(" (in dict)"));
+
+      if ( mem->is_array_ && !noarray )
       { size_t len;
+
+	DEBUG(5, Sdprintf(" (array)"));
 
 	if ( PL_skip_list(Value, 0, &len) != PL_LIST )
 	{ rc = PL_type_error("list", Value);
@@ -3628,11 +3638,13 @@ fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
 
 	  if ( mem->type_id_ ==
 	       rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
-	  { rc = fill_dynamic_struct_array(Value, (char*)msg+mem->offset_, len, mem);
+	  { DEBUG(5, Sdprintf(" (dynamic structs)\n"));
+	    rc = fill_dynamic_struct_array(Value, (char*)msg+mem->offset_, len, mem);
 	  } else
 	  { rosidl_runtime_c__octet__Sequence *seq = (void*)(char*)msg+mem->offset_;
 	    seq_init_function seq_init = primitive_seq_init_function(mem->type_id_);
 
+	    DEBUG(5, Sdprintf(" (dynamic primitives)\n"));
 	    rc = ( (*seq_init)(seq, len) &&
 		   fill_primitive_array(Value, seq->data, len, mem->type_id_) );
 	  }
@@ -3640,11 +3652,14 @@ fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
 	{ if ( len == mem->array_size_ )
 	  { if ( mem->type_id_ ==
 	       rosidl_typesupport_introspection_c__ROS_TYPE_MESSAGE )
+	    { DEBUG(5, Sdprintf(" (static structs)\n"));
 	      rc = fill_static_struct_array(Value, (char*)msg+mem->offset_,
 					    mem->array_size_, mem->members_);
-	    else
+	    } else
+	    { DEBUG(5, Sdprintf(" (static primitives)\n"));
 	      rc = fill_primitive_array(Value, (char*)msg+mem->offset_,
 					mem->array_size_, mem->type_id_);
+	    }
 	  } else
 	  { rc = list_of_length(Value, len, mem->array_size_, TRUE);
 	  }
@@ -3657,6 +3672,9 @@ fill_message(term_t Message, void *msg, const rosidl_message_type_support_t *ts,
       { if ( !fill_primitive(Value, (char*)msg+mem->offset_, mem->type_id_) )
 	  OUTFAIL;
       }
+      DEBUG(5, Sdprintf(" OK\n"));
+    } else
+    { DEBUG(5, Sdprintf(" (not found)\n"));
     }
   }
 
