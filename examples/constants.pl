@@ -29,6 +29,15 @@ provides access to these constants.
 %   ?- listing(constants:is_executing/1).
 %   is_executing(2).
 %   ```
+%
+%   If the constant is unknown an existence_error   is raised and if the
+%   constant is associated with multiple types  and has different values
+%   an ambiguity_error is raised.  In  the   latter  case  the user must
+%   specify the type in the first argument using o
+%
+%     - 'action_msgs/msg/GoalStatus'
+%     - 'GoalStatus'
+%     - goal_status
 
 is_executing(Status) :-
     ros_constant(_, 'STATUS_EXECUTING', Status).
