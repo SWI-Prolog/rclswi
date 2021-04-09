@@ -10,7 +10,7 @@
 
 */
 
-:- reexport(install/rclswi/prolog/ros).
+:- use_module(library(ros)).
 
 num3(A,B,C) :-
     ros_publisher('/num3',
