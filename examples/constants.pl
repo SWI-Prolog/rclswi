@@ -33,7 +33,7 @@ provides access to these constants.
 %   If the constant is unknown an existence_error   is raised and if the
 %   constant is associated with multiple types  and has different values
 %   an ambiguity_error is raised.  In  the   latter  case  the user must
-%   specify the type in the first argument using o
+%   specify the type in the first argument using of the formats below.
 %
 %     - 'action_msgs/msg/GoalStatus'
 %     - 'GoalStatus'
