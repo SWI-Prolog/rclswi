@@ -39,6 +39,7 @@
 
             ros_object/2,               % ?Object, ?Type
             ros_synchronized/2,         % +Object, :Goal
+            ros_package_share_directory/2, % +Package, -Dir
             ros_debug/1                 % +Level
           ]).
 :- autoload(library(error),
