@@ -4064,7 +4064,7 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
   for(i=0, obj=objs; i<len; i++, obj++)
   { int ready = FALSE;
 
-    if ( objs->ctype == &subscription_type )
+    if ( obj->ctype == &subscription_type )
       ready = !!wset.subscriptions[obj->index];
     else if ( obj->ctype == &client_type )
       ready = !!wset.clients[obj->index];
