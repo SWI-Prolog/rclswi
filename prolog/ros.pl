@@ -39,7 +39,8 @@
 
             ros_object/2,               % ?Object, ?Type
             ros_synchronized/2,         % +Object, :Goal
-            ros_create_guard_condition/2,  % -Cond,+Options
+            ros_create_guard_condition/2,  % -Cond, +Options
+            ros_trigger_guard_condition/1, % +Cond
             ros_package_share_directory/2, % +Package, -Dir
             ros_debug/1                    % +Level
           ]).
@@ -314,9 +315,10 @@ ros_node_spin(Node) :-
         '$ros_set_node'(Node, spinner(false))).
 
 ros_node_spin_loop(Node) :-
+    ros_node_store(_Name, Node, _Context, _Mutex, Guard),
     ros_ok,                             % TBD: wait on this node to be shut down
     !,
-    (   ros_spin_once(Node, infinite)
+    (   ros_spin_once(Node, [Guard], infinite)
     ->  true
     ;   thread_wait(waitables_on(Node),
                     [ wait_preds([waitable/4])
@@ -328,6 +330,19 @@ ros_node_spin_loop(_).
 waitables_on(Node) :-
     waitable(_Type, Node, _Obj, _Callback),
     !.
+
+:- prolog_listen(waitable/4, update_waitables, [name(ros)]).
+
+update_waitables(Action, Clause) :-
+    notify_spin_on(Action),
+    clause(waitable(_Type, Node, _Obj, _Callback), true, Clause),
+    debug(ros(spin), 'Change to waitables for ~p', [Node]),
+    forall(ros_node_store(_Name, Node, _Context, _Mutex, Guard),
+           ros_trigger_guard_condition(Guard)).
+
+notify_spin_on(asserta).
+notify_spin_on(assertz).
+notify_spin_on(retract).
 
 %!  ros_spin_once(+Options) is semidet.
 %
@@ -346,10 +361,10 @@ ros_spin_once(Options) :-
     option(timeout(TimeOut), Options, 0.1),
     setup_call_cleanup(
         '$ros_set_node'(Node, spinner(true)),
-        ros_spin_once(Node, TimeOut),
+        ros_spin_once(Node, [], TimeOut),
         '$ros_set_node'(Node, spinner(false))).
 
-%!  ros_spin_once(+Node, +TimeOut) is semidet.
+%!  ros_spin_once(+Node, +ExtraWaitables, +TimeOut) is semidet.
 %
 %   Wait for all waitable objects  registered   with  Node  and call the
 %   callbacks associated with the ready objects.   Fails if there are no
@@ -361,8 +376,8 @@ ros_spin_once(Options) :-
     ros_ready/1,
     ros_ready/3.
 
-ros_spin_once(Node, TimeOut) :-
-    findall(Obj, waitable(_Type, Node, Obj, _Callback), WaitFor),
+ros_spin_once(Node, Extra, TimeOut) :-
+    findall(Obj, waitable(_Type, Node, Obj, _Callback), WaitFor, Extra),
     WaitFor \== [],
     ros_wait(WaitFor, TimeOut, Ready),
     maplist(ros_ready, Ready).
@@ -374,6 +389,8 @@ ros_ready(Obj) :-
         ros_ready_det(Type, Obj, CallBack),
         Error,
         print_message(warning, Error)).
+ros_ready(Obj) :-
+    debug(ros(spin), 'Ignoring ready object ~p', [Obj]).
 
 ros_ready_det(Type, Obj, CallBack) :-
     ros_ready(Type, Obj, CallBack),
@@ -397,7 +414,11 @@ ros_ready(subscription(_), Subscription, CallBack) :-
 
 ros_create_guard_condition(Cond, Options) :-
     ros_context_from_options(Context, Options),
-    '$ros_create_gaurd_condition'(Context, Cond).
+    '$ros_create_guard_condition'(Context, Cond).
+
+%!  ros_trigger_guard_condition(+Cond) is det.
+%
+%   Trigger a guard condition object.
 
 
 		 /*******************************
@@ -419,7 +440,7 @@ ros_create_guard_condition(Cond, Options) :-
 :- dynamic
     ros_default/1,                      % Term
     ros_context_store/1,                % Context
-    ros_node_store/4,                   % Name, Node, Context, Mutex
+    ros_node_store/5,                   % Name, Node, Context, Mutex, SpinGuard
     ros_property_store/1.               % Term
 
 ros_set_defaults(List) :-
@@ -503,7 +524,7 @@ ros_default_argv([]).
 %   creates the node if this has not already been done.
 
 ros_default_node(Node) :-
-    ros_node_store(default, Node0, _, _),
+    ros_node_store(default, Node0, _, _, _),
     !,
     Node = Node0.
 ros_default_node(Node) :-
@@ -511,7 +532,7 @@ ros_default_node(Node) :-
     with_mutex(ros, ros_default_node_sync(Node)).
 
 ros_default_node_sync(Node) :-
-    ros_node_store(default, Node, _, _),
+    ros_node_store(default, Node, _, _, _),
     !.
 ros_default_node_sync(Node) :-
     default_node_name_and_arguments(NodeName, Args),
@@ -533,7 +554,7 @@ default_node_name_and_arguments(NodeName, []) :-
 %   @error existence_error(ros_node, Alias)
 
 ros_node(Alias, Node), atom(Alias) =>
-    (   ros_node_store(Alias, Node, _, _)
+    (   ros_node_store(Alias, Node, _, _, _)
     ->  true
     ;   existence_error(ros_node, Alias)
     ).
@@ -567,7 +588,7 @@ ros_node(Alias, _) =>
 ros_create_node(Name, Node, Options) :-
     select_option(alias(Alias), Options, Options1),
     !,
-    (   ros_node_store(Alias, _, _, _)
+    (   ros_node_store(Alias, _, _, _, _)
     ->  permission_error(create, ros_node, Node)
     ;   true
     ),
@@ -580,7 +601,8 @@ ros_create_node(Name, Alias, Node, Options) :-
     '$ros_create_node'(Context, Name, Node, Options),
     sleep(0.2),                     % TBD: Needed to make the node visible
     mutex_create(Mutex),
-    asserta(ros_node_store(Alias, Node, Context, Mutex)),
+    ros_create_guard_condition(Guard, [context(Context)]),
+    asserta(ros_node_store(Alias, Node, Context, Mutex, Guard)),
     init_node_parameters(Node, Options).
 
 ros_context_from_options(Context, Options) :-
@@ -638,7 +660,7 @@ create_node_clock(_Node, Context, Clock) :-
 %   Object must be a node instance
 
 ros_synchronized(Node, Goal) :-
-    ros_node_store(_, Node, _, Mutex),
+    ros_node_store(_, Node, _, Mutex, _),
     !,
     with_mutex(Mutex, Goal).
 
@@ -652,7 +674,7 @@ ros_shutdown :-
            ros_shutdown(Context)).
 
 ros_shutdown(Context) :-
-    forall(ros_node_store(_Name, Node, Context, _),
+    forall(ros_node_store(_Name, Node, Context, _, _),
            ros_shutdown_node(Node)),
     '$ros_logging_shutdown',
     forall(ros_context_store(Context),
@@ -661,6 +683,7 @@ ros_shutdown(Context) :-
 ros_shutdown_node(Node) :-
     forall(retract(waitable(Type, Node, Object, _CallBack)),
            shutdown_waitable(Type, Object)),
+    retractall(ros_node_store(_, Node, _, _, _)),
     ros_node_fini(Node).
 
 shutdown_waitable(subscription(_Topic), Object) :-

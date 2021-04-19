@@ -537,7 +537,7 @@ static foreign_t
 ros_create_guard_condition(term_t Context, term_t Cond)
 { rcl_context_t *context;
   atom_t context_symbol;
-  rclswi_guard_condition_t *gc = 0;
+  rclswi_guard_condition_t *gc = NULL;
   int rc = TRUE;
 
   if ( !get_pointer_and_symbol(Context, (void**)&context, &context_symbol,
@@ -565,6 +565,19 @@ ros_create_guard_condition(term_t Context, term_t Cond)
   return rc;
 }
 
+
+static foreign_t
+ros_trigger_guard_condition(term_t Cond)
+{ rclswi_guard_condition_t *gc;
+  int rc = TRUE;
+
+  if ( !get_pointer(Cond, (void**)&gc, &guard_condition_type) )
+    return FALSE;
+
+  TRY(rcl_trigger_guard_condition(&gc->cond));
+
+  return rc;
+}
 
 
 		 /*******************************
@@ -4577,6 +4590,7 @@ install_librclswi(void)
        ros_action_server_names_and_types, 0);
 
   PRED("$ros_create_guard_condition", 2,  ros_create_guard_condition,  0);
+  PRED("ros_trigger_guard_condition", 1,  ros_trigger_guard_condition, 0);
 
 					/* install helpers */
   install_ros_logging();
