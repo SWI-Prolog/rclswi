@@ -1,9 +1,20 @@
 # rclswi: a SWI-Prolog client for ROS2
 
+This repo provides an _RCL_ (_ROS  Client   Library_)  that allows for a
+Prolog process to create one or more nodes  in a ROS network. The aim of
+this library is to support demanding   applications. The client exploits
+SWI-Prolog's scalable multi-threading capabilities that lets you use all
+cores. The file EVAL.md is a very   crude evaluation that indicates that
+the performance is  significantly  better   than  `rclpy`,  the standard
+Python client library for ROS.
+
+
 __WARNING__
 
-> This is work in progress. The current library is a fairly complete
-> ROS2 client library.  The interfaces are not completely settled.
+> This repo provides a first version of  the SWI-Prolog ROS2 bridge. Not
+> all functionality is provided and most of   the  interface is not well
+> tested. Still, the current version should be enough for evaluation and
+> prototyping.
 
 ## Building
 
@@ -143,11 +154,10 @@ main :-
 ```
 
 
-## TODO
+## Status
 
-The current version is a proof of   concept.  It demonstrates we can use
-`rcl` and `rmw` to access ROS2 and   convert  messages into Prolog using
-type introspection.  Missing:
+The listb below is lists parts  of   the  RCL  functionality and what is
+supported by the current version of rclswi.
 
   - [ ] Type handling
     - [x] Convert message from C to Prolog
@@ -226,6 +236,7 @@ type introspection.  Missing:
     - [ ] Finish and reclaim resources in the right order.
   - [ ] Documentation
     - [x] In code documentation
+    - [x] Local HTTP server for documentation (see above)
     - [ ] Generate a stand-alone document
   - [ ] Testing
   - [ ] Performance evaluation
