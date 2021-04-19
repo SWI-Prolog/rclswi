@@ -40,9 +40,6 @@ pub(Type, Labels, Data) :-
     debug(multi_array, 'Publishing to ~p', [Topic]),
     ros_publish(Topic, Msg).
 
-
-:- table pub_sub/1 as shared.
-
 pub_sub(Type) :-
     pub(Type),
     sub(Type).
