@@ -69,7 +69,7 @@ answers](https://answers.ros.org/questions/).  Bug  fixes   and  feature
 requests can use the issue tracker of the GitHub repository.
 
 All contributions are welcome: example   code, fixes, better interfaces,
-ports, etc.  Please provide as Git pull requests if possible.
+ports, tests, etc. Please provide as Git pull requests if possible.
 
 
 ## Status
