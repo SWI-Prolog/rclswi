@@ -21,7 +21,7 @@
             ros_shutdown/0,
 
             ros_subscribe/3,            % +Topic, :CallBack, +Options
-            ros_unsubscribe/1,          % +Topic
+            ros_unsubscribe/2,          % +Topic, +Options
 
             ros_publish/2,              % +Topic, +Message
             ros_publish/3,              % +Topic, +Message, +Options
@@ -170,7 +170,6 @@ type_introspection_function_prefix(
 %   calling ros_spin/0,1, which can  be  a   different  thread  than the
 %   thread that registers the subscription.  Options:
 %
-%
 %     - node(+Node)
 %       Specify the node to use.  Default is the node returned by
 %       ros_default_node/1.
@@ -181,10 +180,23 @@ type_introspection_function_prefix(
 %       exists (yet) as well as to be explicit about what you expect.
 %     - qos_profile(+QoSProfile)
 %       Quality of Service profile.  Not yet defined or implemented.
+%
+%   If the specified subscription is already defined  this is a no-op. A
+%   subscription is considered equal of the   Topic, `Node` and CallBack
+%   match. Thus, one can subscribe  multiple   times  to  the same Topic
+%   using different callbacks.
 
 ros_subscribe(Topic, CallBack, Options) :-
-    message_type(Topic, MsgType, Options),
+    must_be(atom, Topic),
     node_from_options(Node, Options),
+    ros_synchronized(Node, ros_subscribe_sync(Node, Topic, CallBack, Options)).
+
+ros_subscribe_sync(Node, Topic, CallBack, _Options) :-
+    waitable(subscription(Topic), Node, _Subscription, CallBackNow),
+    CallBack =@= CallBackNow,
+    !.
+ros_subscribe_sync(Node, Topic, CallBack, Options) :-
+    message_type(Topic, MsgType, Options),
     ros_msg_type_support(MsgType, TypeSupport),
     qos_profile_from_options(QoSProfile, Options),
     '$ros_subscribe'(Node, TypeSupport, Topic, QoSProfile, Subscription),
@@ -199,15 +211,22 @@ message_type(Topic, MsgType, _Options) :-
 message_type(Topic, _, _) :-
     existence_error(topic, Topic).
 
-%!  ros_unsubscribe(+Topic) is semidet.
+%!  ros_unsubscribe(+Topic, +Options) is det.
 %
-%   Unsubscribe from Topic. Fails silently if   no subscription on Topic
-%   is known.
+%   Unsubscribe from Topic.  Options:
+%
+%     - node(+Node)
+%       Only unsubscribe subscriptios on the specified node.  When
+%       omitted the topic is unsubscribed from all nodes.
 
-ros_unsubscribe(Topic) :-
-    retract(waitable(subscription(Topic), _Node, Subscription, _CallBack)),
-    !,
-    '$ros_unsubscribe'(Subscription).
+ros_unsubscribe(Topic, Options) :-
+    must_be(atom, Topic),
+    (   option(node(_), Options)
+    ->  node_from_options(Node, Options)
+    ;   true
+    ),
+    forall(retract(waitable(subscription(Topic), Node, Subscription, _CallBack)),
+           '$ros_unsubscribe'(Subscription)).
 
 %!  ros_publish(+Topic, +Message) is det.
 %!  ros_publish(+Topic, +Message, +Options) is det.
@@ -851,7 +870,10 @@ ros_msg_type_support(MsgType, MsgFunctions) :-
     load_type_support(Package),
     atomic_list_concat([TSPrefix, FuncPostfix], '__', TSFunc),
     atomic_list_concat([ISPrefix, FuncPostfix], '__', ISFunc),
-    '$ros_message_type'(ISFunc, TSFunc, FuncPostfix, MsgFunctions).
+    '$ros_message_type'(ISFunc, TSFunc, FuncPostfix, MsgFunctions),
+    !.
+ros_msg_type_support(MsgType, _) :-
+    existence_error(ros_message_type, MsgType).
 
 ros_srv_type_support(SrvType, SrvFunctions) :-
     type_support_function_prefix(srv, TSPrefix),
@@ -866,7 +888,10 @@ ros_srv_type_support(SrvType, SrvFunctions) :-
     '$ros_service_type'(ISFuncRequest, ISFuncResponse,
                         TSFunc,
                         FuncPostfixRequest, FuncPostfixResponse,
-                        SrvFunctions).
+                        SrvFunctions),
+    !.
+ros_srv_type_support(SrvType, _) :-
+    existence_error(ros_message_type, SrvType).
 
 ros_action_type_support(ActType, ActFunctions) :-
     type_support_function_prefix(action, TSPrefix),
@@ -889,8 +914,10 @@ ros_action_type_support(ActType, ActFunctions) :-
                        TSFunc,
                        FuncPostfixGoalRequest, FuncPostfixGoalResponse,
                        FuncPostfixResultRequest, FuncPostfixResultResponse, FuncPostfixFeedback,
-                       ActFunctions).
-
+                       ActFunctions),
+    !.
+ros_action_type_support(ActType, _) :-
+    existence_error(ros_message_type, ActType).
 
 type_support_function(MsgType, Package, FuncPostfix) :-
     phrase(segments(MsgType), Segments),
