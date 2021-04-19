@@ -126,6 +126,7 @@ static functor_t FUNCTOR_action_server5;
 		 *******************************/
 
 static void free_rcl_context(void*);
+static void free_rcl_guard_condition(void*);
 static void free_rcl_node(void*);
 static void free_rcl_publisher(void*);
 static void free_rcl_subscription(void*);
@@ -140,6 +141,11 @@ static void free_goal_handle(void*);
 static c_pointer_type context_type =
 { "ros_context",
   free_rcl_context
+};
+
+static c_pointer_type guard_condition_type =
+{ "ros_guard_condition",
+  free_rcl_guard_condition
 };
 
 static c_pointer_type node_type =
@@ -502,6 +508,61 @@ rclswi_parse_args(term_t list, rcl_arguments_t *parsed_args)
   free_rcl_arglist(arg_values, num_args, &rclswi_default_allocator);
   return rc;
 }
+
+		 /*******************************
+		 *	 GUARD CONDITIONS	*
+		 *******************************/
+
+typedef struct
+{ rcl_guard_condition_t cond;
+  int			init;
+  atom_t		context_symbol;
+} rclswi_guard_condition_t;
+
+static void
+free_rcl_guard_condition(void* ptr)
+{ rclswi_guard_condition_t *gc = ptr;
+
+  PL_unregister_atom(gc->context_symbol);
+  if ( gc->init )
+  { TRYVOID(rcl_guard_condition_fini(&gc->cond));
+    gc->init = FALSE;
+  }
+  free(ptr);
+}
+
+static foreign_t
+ros_create_guard_condition(term_t Context, term_t Cond)
+{ rcl_context_t *context;
+  atom_t context_symbol;
+  rclswi_guard_condition_t *gc = 0;
+  int rc = TRUE;
+
+  if ( !get_pointer_and_symbol(Context, (void**)&context, &context_symbol,
+			       &context_type) )
+    return FALSE;
+
+  if ( (gc=malloc(sizeof(*gc))) )
+  { rcl_guard_condition_options_t gc_options =
+      rcl_guard_condition_get_default_options();
+
+    memset(gc, 0, sizeof(*gc));
+    gc->context_symbol = context_symbol;
+    PL_register_atom(gc->context_symbol);
+    gc->cond = rcl_get_zero_initialized_guard_condition();
+    TRY(rcl_guard_condition_init(&gc->cond, context, gc_options));
+    gc->init = TRUE;
+    rc = unify_pointer(Cond, gc, &guard_condition_type);
+  } else
+  { rc = PL_resource_error("memory");
+  }
+
+  if ( !rc && gc )
+    free_rcl_guard_condition(gc);
+
+  return rc;
+}
+
 
 
 		 /*******************************
@@ -4497,6 +4558,8 @@ install_librclswi(void)
        ros_action_client_names_and_types, 0);
   PRED("ros_action_server_names_and_types", 4,
        ros_action_server_names_and_types, 0);
+
+  PRED("ros_create_guard_condition", 2,  ros_create_guard_condition,  0);
 
 					/* install helpers */
   install_ros_logging();
