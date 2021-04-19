@@ -205,6 +205,7 @@ type introspection.  Missing:
   - [ ] Deal with clocks
     - [x] Basics for creating a clock and asking its time
   - [ ] Deal with timers
+  - [x] Deal with guard conditions
   - [ ] Advanced configuration
     - [x] Provide access to the QoS policies
   - [ ] ROS2 Lifecycle support?
