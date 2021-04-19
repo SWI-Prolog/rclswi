@@ -50,6 +50,12 @@ pub(Type) :-
                   [ message_type(MsgType)
                   ]).
 
+%!  sub(+Type)
+%
+%   Subscribe to the multi array  topic   associated  to  Type and print
+%   messages  arriving  on  that  topic.  Prints  the  raw  message  and
+%   translates it back to a Prolog array.
+
 sub(Type) :-
     type_topic(Type, Topic, MsgType),
     ros_subscribe(Topic, on_msg,

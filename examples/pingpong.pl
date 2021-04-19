@@ -9,14 +9,15 @@
 
 /** <module> Performance test
 
-This demo creates the topics `/ping` and  `/pong`. Pont simply echos any
+This demo creates the topics `/ping` and  `/pong`. Pong simply echos any
 message it received on `/pong` to  `/ping`.   The  ping node receives on
 `/ping', decrements and sends on `/pong`.  When the count is decremented
 to zero we send a thread message that we are done.
 
-Use two terminals.  Start using
+By default this demo creates two nodes in   the  same process. To use on
+two terminals, add the `-l` flag to stop program initialization:
 
-    swipl -p library=install/rclswi/prolog src/rclswi/examples/pingpong.pl
+    swipl -p library=install/rclswi/prolog -l src/rclswi/examples/pingpong.pl
 
 Run this in one terminal:
 
@@ -41,14 +42,21 @@ pingpong(Start) :-
     ros_publish('/ping', _{data: Start}),
     time(thread_get_message(done)).
 
+% Initialise both nodes at program startup.
+:- initialization(ping_node, program).
+:- initialization(pong_node, program).
+
 ping_node :-
+    ros_create_node(ping, Node, []),
     ros_publisher('/pong',
-                  [ message_type('std_msgs/msg/Int64')
+                  [ message_type('std_msgs/msg/Int64'),
+                    node(Node)
                   ]),
     ros_subscribe('/ping', on_ping,
-                  [ message_type('std_msgs/msg/Int64')
+                  [ message_type('std_msgs/msg/Int64'),
+                    node(Node)
                   ]),
-    spin.
+    ros_spin([thread(ping), node(Node)]).
 
 on_ping(Msg) :-
     Down is Msg.data-1,
@@ -58,16 +66,16 @@ on_ping(Msg) :-
     ).
 
 pong_node :-
+    ros_create_node(pong, Node, []),
     ros_publisher('/ping',
-                  [ message_type('std_msgs/msg/Int64')
+                  [ message_type('std_msgs/msg/Int64'),
+                    node(Node)
                   ]),
     ros_subscribe('/pong', on_pong,
-                  [ message_type('std_msgs/msg/Int64')
+                  [ message_type('std_msgs/msg/Int64'),
+                    node(Node)
                   ]),
-    spin.
+    ros_spin([thread(pong), node(Node)]).
 
 on_pong(Msg) :-
     ros_publish('/ping', Msg).
-
-spin :-
-    thread_create(ros_spin, _, [detached(true)]).

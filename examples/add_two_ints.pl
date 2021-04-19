@@ -1,7 +1,7 @@
 /*  This example code is public domain.
 */
 
-:- module(services,
+:- module(add_two_ints,
           [ type/0,
             type/1,                     % +ServiceName
             add/3,                      % +A, +B, -Sum
@@ -9,12 +9,24 @@
             add_server_fold/0
           ]).
 :- use_module(library(pprint)).
-:- use_module(library(debug)).
 
-:- reexport(library(ros/services)).
-:- reexport(library(ros)).
+:- use_module(library(ros)).
+:- use_module(library(ros/services)).
+:- use_module(library(ros/types)).
 
 /** <module>
+
+For typical usage, use two terminals and start in both:
+
+    swipl -p library=install/rclswi/prolog src/rclswi/example/add_two_ints.pl
+
+Now in one run
+
+    ?- add_server.
+
+And in the other run e.g.
+
+    ?- add(1, 1, X).
 
 @see https://docs.ros.org/en/foxy/Tutorials/Writing-A-Simple-Py-Service-And-Client.html
 */

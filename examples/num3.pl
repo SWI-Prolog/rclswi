@@ -8,6 +8,12 @@
 
 /** <module> Test fixed arrays
 
+Very simple test dealing with user defined  types from the ROS2 tutorial
+on interfaces.  `Num3.msg` holds:
+
+```
+int64[3] num
+```
 */
 
 :- use_module(library(ros)).
@@ -23,7 +29,7 @@ listen :-
     ros_subscribe('/num3', on_num,
                   [ message_type('tutorial_interfaces/msg/Num3')
                   ]),
-    thread_create(ros_spin, _, [detached(true)]).
+    ros_spin([thread(spinner)]).
 
 on_num(Msg) :-
     format('Received ~p~n', [Msg]).

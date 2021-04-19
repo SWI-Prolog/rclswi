@@ -10,16 +10,26 @@
           ]).
 :- use_module(library(pprint)).
 
-/** <module> Test fixed arrays
+/** <module> Test fixed and dynamic arrays
+
+Times.msg holds
+
+```
+builtin_interfaces/Time[2] duration
+builtin_interfaces/Time[] series
+```
 
 */
 
-:- reexport(library(ros)).
+:- use_module(library(ros)).
+:- use_module(library(ros/types)).
 
 % TBD: Should not be needed
 
 :- initialization
     ros:load_type_support(builtin_interfaces).
+
+:- initialization(sub, program).
 
 type :-
     ros_type_introspection('tutorial_interfaces/msg/Times', X),
@@ -31,11 +41,13 @@ pub :-
                   ]).
 
 pub(T0, T1) :-
+    pub,
     maplist(ros_time_prolog, Msg, [T0,T1]),
     ros_publish('/times',
                 _{duration: Msg}).
 
 pub(List) :-
+    pub,
     maplist(ros_time_prolog, Msg, List),
     ros_publish('/times',
                 _{series: Msg}).
@@ -52,7 +64,7 @@ sub :-
     ros_subscribe('/times', on_sequence,
                   [ message_type('tutorial_interfaces/msg/Times')
                   ]),
-    thread_create(ros_spin, _, [detached(true)]).
+    ros_spin([thread(spinner)]).
 
 on_sequence(Msg) :-
     format('Received ~p~n', [Msg]).
