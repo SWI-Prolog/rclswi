@@ -12,6 +12,7 @@
 :- use_module(library(apply)).
 :- use_module(library(error)).
 :- use_module(library(lists)).
+:- use_module(library(debug)).
 
 /** <module> Test fixed arrays
 
@@ -21,20 +22,26 @@ description of the dimensions. This representation is deprecated, but to
 us useful for illustrating handling of complex ROS message types.
 */
 
-:- reexport(library(ros)).
+:- use_module(library(ros)).
+:- use_module(library(ros/types)).
 
-%!  pub(+Labels, +Data) is det.
+%!  pub(+Type, +Labels, +Data) is det.
 %
 %   Publish a multi array from Labels and Data. Data is represented as a
 %   nested Prolog list. Labels is a   list of dimension labels, starting
 %   with the outermost list.  For example:
 %
-%       ?- pub([y,x], [[1,2,3], [2,4,5]])
+%       ?- pub(int64, [y,x], [[1,2,3], [2,4,5]]).
 
 pub(Type, Labels, Data) :-
+    pub_sub(Type),
     type_topic(Type, Topic, _MsgType),
     ros_multi_array_prolog(Msg, Labels, Data),
+    debug(multi_array, 'Publishing to ~p', [Topic]),
     ros_publish(Topic, Msg).
+
+
+:- table pub_sub/1 as shared.
 
 pub_sub(Type) :-
     pub(Type),
@@ -51,7 +58,7 @@ sub(Type) :-
     ros_subscribe(Topic, on_msg,
                   [ message_type(MsgType)
                   ]),
-    thread_create(ros_spin, _, [detached(true)]).
+    ros_spin([thread(spinner)]).
 
 on_msg(Msg) :-
     (   ros_multi_array_prolog(Msg, Labels, Data)
@@ -96,7 +103,8 @@ multi_array_dim(Labels, Data, DIM) :-
     multi_array_dim(Labels, Data, DIM, _Stride).
 
 multi_array_dim([], _Data, [], 1).
-multi_array_dim([L0|L], Data, [_{label:L0, size:Size, stride:Stride}|DIM], Stride) :-
+multi_array_dim([L0|L], Data,
+                [_{label:L0, size:Size, stride:Stride}|DIM], Stride) :-
     length(Data, Size),
     Data = [H|_],
     (   L \== []
