@@ -276,6 +276,11 @@ register_waitable(Type, Node, Object, Callback) :-
 %       The node to use
 %     - thread(TrueOrAlias)
 %       Run the spinner in a thread. If `true`, the thread is anonymous.
+%       This is a no-op if the target node already has a spinning
+%       thread.
+%
+%   @error permission_error(spin, ros_node, Node) if   another thread is
+%   spinning on this node.
 
 ros_spin :-
     ros_spin([]).
@@ -284,14 +289,30 @@ ros_spin(Options) :-
     node_from_options(Node, Options),
     (   option(thread(TrueAlias), Options)
     ->  (   TrueAlias == true
-        ->  ThreadOptions = []
-        ;   ThreadOptions = [alias(TrueAlias)]
+        ->  true
+        ;   Alias = TrueAlias
         ),
-        thread_create(ros_node_spin(Node), _, ThreadOptions)
+        ros_synchronized(Node, create_spin_thread(Node, Alias))
     ;   ros_node_spin(Node)
     ).
 
+create_spin_thread(Node, Alias) :-
+    ros_node_property(Node, spinner(Alias)).
+create_spin_thread(Node, Alias) :-
+    var(Alias),
+    !,
+    thread_create(ros_node_spin(Node), _, [detached(true)]).
+create_spin_thread(Node, Alias) :-
+    thread_create(ros_node_spin(Node), _, [alias(Alias)]).
+
+
 ros_node_spin(Node) :-
+    setup_call_cleanup(
+        '$ros_set_node'(Node, spinner(true)),
+        ros_node_spin_loop(Node),
+        '$ros_set_node'(Node, spinner(false))).
+
+ros_node_spin_loop(Node) :-
     ros_ok,                             % TBD: wait on this node to be shut down
     !,
     (   ros_spin_once(Node, infinite)
@@ -300,8 +321,8 @@ ros_node_spin(Node) :-
                     [ wait_preds([waitable/4])
                     ])
     ),
-    ros_node_spin(Node).
-ros_node_spin(_).
+    ros_node_spin_loop(Node).
+ros_node_spin_loop(_).
 
 waitables_on(Node) :-
     waitable(_Type, Node, _Obj, _Callback),
@@ -322,8 +343,10 @@ waitables_on(Node) :-
 ros_spin_once(Options) :-
     node_from_options(Node, Options),
     option(timeout(TimeOut), Options, 0.1),
-    ros_spin_once(Node, TimeOut).
-
+    setup_call_cleanup(
+        '$ros_set_node'(Node, spinner(true)),
+        ros_spin_once(Node, TimeOut),
+        '$ros_set_node'(Node, spinner(false))).
 
 %!  ros_spin_once(+Node, +TimeOut) is semidet.
 %
@@ -672,6 +695,9 @@ ros_ok :-
 %       library(ros/logging) for details.
 %     - clock(-Clock)
 %       Get the clock associated to this node.
+%     - spinner(-Thread)
+%       Thread that is spinning on this node using ros_spin/1 or
+%       ros_spin_once/1.
 
 ros_node_property(Node, Property) :-
     ros_property_node(Property, Node).
@@ -690,6 +716,14 @@ ros_property_node(clock(Clock), Node) :-
     node_clock(Node, Clock).
 ros_property_node(context(Context), Node) :-
     '$ros_node_prop'(Node, context, Context).
+ros_property_node(spinner(Thread), Node) :-
+    '$ros_node_prop'(Node, spinner, TID),
+    (   Thread == TID
+    ->  true
+    ;   catch(thread_property(TID, alias(Alias)), error(_,_), fail)
+    ->  Thread = Alias
+    ;   Thread = TID
+    ).
 
 %!  ros_publisher(+Node, +MsgType, +Topic, +QoSProfile, -Publisher)
 %

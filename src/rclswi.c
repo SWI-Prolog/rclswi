@@ -103,6 +103,7 @@ static atom_t ATOM_service_info;
 static atom_t ATOM_source_timestamp;
 static atom_t ATOM_stamp;
 static atom_t ATOM_steady;
+static atom_t ATOM_spinner;
 static atom_t ATOM_system;
 static atom_t ATOM_type;
 static atom_t ATOM_writer_guid;
@@ -510,6 +511,8 @@ rclswi_parse_args(term_t list, rcl_arguments_t *parsed_args)
 typedef struct
 { rcl_node_t node;
   atom_t     context_symbol;
+  int	     spinner;			/* Spinning thread id */
+  int	     spin_count;		/* Nesting */
 } rclswi_node_t;
 
 
@@ -577,6 +580,7 @@ ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
     { rc=PL_resource_error("memory");
       OUTFAIL;
     }
+    memset(node, 0, sizeof(*node));
     node->context_symbol = context_symbol;
     node->node = rcl_get_zero_initialized_node();
     options.use_global_arguments = use_global_arguments;
@@ -638,9 +642,56 @@ ros_node_prop(term_t Node, term_t Prop, term_t Value)
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, logger_name);
   } else if ( prop == ATOM_context )
   { return PL_unify_atom(Value, node->context_symbol);
+  } else if ( prop == ATOM_spinner )
+  { if ( node->spinner > 0 )
+      return PL_unify_integer(Value, node->spinner);
   }
 
   return FALSE;
+}
+
+static foreign_t
+ros_set_node(term_t Node, term_t Prop)
+{ rclswi_node_t *node;
+  atom_t name;
+  size_t arity;
+
+  if ( !get_pointer(Node, (void**)&node, &node_type) )
+    return FALSE;
+
+  if ( PL_get_name_arity(Prop, &name, &arity) && arity == 1 )
+  { term_t arg = PL_new_term_ref();
+
+    _PL_get_arg(1, Prop, arg);
+    if ( name == ATOM_spinner )
+    { int spinning;
+
+      if ( PL_get_bool_ex(arg, &spinning) )
+      { int tid = PL_thread_self();
+
+	if ( spinning )
+	{ if ( node->spinner > 0 )
+	  { if ( node->spinner == tid )
+	      node->spin_count++;
+	    else
+	      return PL_permission_error("spin", "ros_node", Node);
+	  } else
+	  { node->spinner = tid;
+	    node->spin_count = 1;
+	  }
+	} else
+	{ if ( !(node->spinner == tid && node->spin_count > 0) )
+	    return PL_permission_error("unspin", "ros_node", Node);
+	  node->spin_count--;
+	}
+      }
+
+      return TRUE;
+    }
+    return PL_domain_error("ros_node_property", Prop);
+  }
+
+  return PL_type_error("compound", Prop);
 }
 
 
@@ -4348,6 +4399,7 @@ install_librclswi(void)
   MKATOM(source_timestamp);
   MKATOM(stamp);
   MKATOM(steady);
+  MKATOM(spinner);
   MKATOM(system);
   MKATOM(type);
   MKATOM(writer_guid);
@@ -4369,6 +4421,7 @@ install_librclswi(void)
   PRED("$ros_create_node",	     4,	ros_create_node,	    0);
   PRED("ros_node_fini",		     1,	ros_node_fini,		    0);
   PRED("$ros_node_prop",	     3,	ros_node_prop,		    0);
+  PRED("$ros_set_node",		     2,	ros_set_node,		    0);
   PRED("$ros_publisher",	     5,	ros_publisher,		    0);
   PRED("$ros_subscribe",	     5,	ros_subscribe,		    0);
   PRED("$ros_unsubscribe",	     1,	ros_unsubscribe,	    0);
