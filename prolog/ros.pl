@@ -39,8 +39,9 @@
 
             ros_object/2,               % ?Object, ?Type
             ros_synchronized/2,         % +Object, :Goal
+            ros_create_guard_condition/2,  % -Cond,+Options
             ros_package_share_directory/2, % +Package, -Dir
-            ros_debug/1                 % +Level
+            ros_debug/1                    % +Level
           ]).
 :- autoload(library(error),
             [ must_be/2,
@@ -385,6 +386,18 @@ ros_ready_det(Type, Obj, CallBack) :-
 ros_ready(subscription(_), Subscription, CallBack) :-
     ros_take(Subscription, Message, _MsgInfo),
     call(CallBack, Message).
+
+
+%!  ros_create_guard_condition(-Cond, +Options) is det.
+%
+%   Create a ROS guard condition.  Options processed:
+%
+%    - context(+Context)
+%      Context to use.  Default is provided by ros_default_context/1.
+
+ros_create_guard_condition(Cond, Options) :-
+    ros_context_from_options(Context, Options),
+    '$ros_create_gaurd_condition'(Context, Cond).
 
 
 		 /*******************************

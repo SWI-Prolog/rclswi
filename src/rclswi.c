@@ -515,8 +515,10 @@ rclswi_parse_args(term_t list, rcl_arguments_t *parsed_args)
 
 typedef struct
 { rcl_guard_condition_t cond;
-  int			init;
   atom_t		context_symbol;
+  int			init;
+  int			waiting;
+  int			deleted;
 } rclswi_guard_condition_t;
 
 static void
@@ -3804,15 +3806,15 @@ out:
 typedef struct wait_obj
 { c_pointer_type *ctype;
   union
-  { rclswi_subscription_t  *swi_subscription;
-    rcl_guard_condition_t  *guard_condition;
-    rcl_timer_t            *timer;
-    rclswi_client_t        *client;
-    rclswi_service_t	   *service;
-    rclswi_action_client_t *action_client;
-    rclswi_action_server_t *action_server;
-    rcl_event_t		   *events;
-    void                   *ptr;
+  { rclswi_subscription_t    *swi_subscription;
+    rclswi_guard_condition_t *guard_condition;
+    rcl_timer_t              *timer;
+    rclswi_client_t          *client;
+    rclswi_service_t	     *service;
+    rclswi_action_client_t   *action_client;
+    rclswi_action_server_t   *action_server;
+    rcl_event_t		     *events;
+    void                     *ptr;
   } obj;				/* The pointer */
   size_t index;
   atom_t symbol;			/* Prolog blob handle */
@@ -3881,6 +3883,12 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
       { service->waiting = TRUE;
 	TRY_SILENT(rcl_wait_set_add_service(wset, &service->service, &obj->index));
       }
+    } else if ( obj->ctype == &guard_condition_type )
+    { rclswi_guard_condition_t *cond = obj->obj.guard_condition;
+      if ( !cond->deleted )
+      { cond->waiting = TRUE;
+	TRY_SILENT(rcl_wait_set_add_guard_condition(wset, &cond->cond, &obj->index));
+      }
     } else if ( obj->ctype == &action_client_type )
     { rclswi_action_client_t *client = obj->obj.action_client;
       if ( !client->deleted )
@@ -3920,6 +3928,11 @@ rclswi_wait(rcl_wait_set_t *wset, int64_t tmo, wait_obj *objs, size_t len)
       service->waiting = FALSE;
       if ( service->deleted )
 	TRY_ANYWAY(rcl_service_fini(&service->service, service->node));
+    } else if ( obj->ctype == &guard_condition_type )
+    { rclswi_guard_condition_t *cond = obj->obj.guard_condition;
+      cond->waiting = FALSE;
+      if ( cond->deleted )
+	TRY_ANYWAY(rcl_guard_condition_fini(&cond->cond));
     } else if ( obj->ctype == &action_client_type )
     { rclswi_action_client_t *client = obj->obj.action_client;
       client->waiting = FALSE;
@@ -3995,6 +4008,8 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
     { nclients += 3; nsubs += 2;	/* needed? */
     } else if ( objs[i].ctype == &action_server_type )
     { nservices += 3; ntimers += 1;
+    } else if ( objs[i].ctype == &guard_condition_type )
+    { nguards++;
     } else
       assert(0);
   }
@@ -4042,6 +4057,8 @@ ros_wait(term_t For, term_t Timeout, term_t Ready)
       ready = !!wset.clients[obj->index];
     else if ( obj->ctype == &service_type )
       ready = !!wset.services[obj->index];
+    else if ( obj->ctype == &guard_condition_type )
+      ready = !!wset.guard_conditions[obj->index];
     else if ( obj->ctype == &action_client_type )
     { bool is_feedback_ready = false;
       bool is_status_ready = false;
@@ -4559,7 +4576,7 @@ install_librclswi(void)
   PRED("ros_action_server_names_and_types", 4,
        ros_action_server_names_and_types, 0);
 
-  PRED("ros_create_guard_condition", 2,  ros_create_guard_condition,  0);
+  PRED("$ros_create_guard_condition", 2,  ros_create_guard_condition,  0);
 
 					/* install helpers */
   install_ros_logging();
