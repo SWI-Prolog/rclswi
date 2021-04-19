@@ -15,9 +15,12 @@
 
 /** <module> Test exchange of standard message types
 
+This demo creates a  publish/subscribe  pair   for  all  the  "standard"
+messages to verify round tripping of messages.
 */
 
-:- reexport(library(ros)).
+:- use_module(library(ros)).
+:- use_module(library(ros/types)).
 
 test_std_msgs :-
     run_tests([std_msgs]).
