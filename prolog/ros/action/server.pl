@@ -214,7 +214,7 @@ managed_goal(Server, GoalID, Callback, Goal) :-
     ;   true
     ),
     (   Error == ros(cancel)
-    ->  ros:ros_action_update_goal_state(Handle, cancelled),
+    ->  ros:ros_action_update_goal_state(Handle, canceled),
         ros:ros_action_publish_status(Server),
         throw(Error)
     ;   (   Success == true
@@ -289,7 +289,9 @@ join_cancel_response(_{return_code:_, goals_canceling:Cancelling1},
 
 cancel_goal(Server, GoalID, Response) :-
     (   goal(Server, Handle, GoalID, Thread)
-    ->  cancel_goal(Thread, Status),
+    ->  ros:ros_action_update_goal_state(Handle, cancel_goal),
+        ros:ros_action_publish_status(Server),
+        cancel_goal(Thread, Status),
         cancel_enum(StatusCode, Status),
         (   Status == none
         ->  ros_goal_handle_property(Handle, info(Info)),
