@@ -5,6 +5,7 @@
           [ type/0,
             type/1,                     % +ServiceName
             add/3,                      % +A, +B, -Sum
+            bench/1,                    % +Times
             add_server/0,
             add_server_fold/0
           ]).
@@ -63,6 +64,17 @@ client(Client) :-
     ros_client('/add_two_ints',
                'example_interfaces/srv/AddTwoInts',
                Client, []).
+
+%!  bench(+Times)
+%
+%   Run the addition Times times and report on timing.  For example:
+%
+%       ?- bench(100 000).
+%       % 5,100,001 inferences, 1.402 CPU in 5.098 seconds (27% CPU, 3638698 Lips)
+
+bench(Times) :-
+    time(forall(between(1, Times, _),
+                add(1,2,_))).
 
 %!  add_server
 %
