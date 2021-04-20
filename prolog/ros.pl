@@ -399,17 +399,30 @@ ros_spin_once(Node, Extra, TimeOut) :-
     findall(Obj, waitable(_Type, Node, Obj, _Callback), WaitFor, Extra),
     WaitFor \== [],
     ros_wait(WaitFor, TimeOut, Ready),
-    maplist(ros_ready, Ready).
+    ros_ready_list(Ready).
+
+ros_ready_list([]).
+ros_ready_list([H|T]) :-
+    (   catch_with_backtrace(
+            ros_ready(H),
+            Error,
+            print_message(warning, Error))
+    ->  true
+    ;   debug(ros(spin), 'Ignoring ready object ~p', [H])
+    ),
+    ros_ready_list(T).
+
+%!  ros_ready(+Obj)
+%
+%   Hookable  predicate  to  handle  a  ready   object  as  returned  by
+%   ros_wait/3. This is  a  variation  on   ros_ready/3  below  that  is
+%   intended for action  servers  and  action   clients  that  return  a
+%   compound term rather than a simple object.
 
 ros_ready(Obj) :-
     waitable(Type, _Node, Obj, CallBack),
     !,
-    catch_with_backtrace(
-        ros_ready_det(Type, Obj, CallBack),
-        Error,
-        print_message(warning, Error)).
-ros_ready(Obj) :-
-    debug(ros(spin), 'Ignoring ready object ~p', [Obj]).
+    ros_ready_det(Type, Obj, CallBack).
 
 ros_ready_det(Type, Obj, CallBack) :-
     ros_ready(Type, Obj, CallBack),
@@ -418,6 +431,11 @@ ros_ready_det(Type, Obj, CallBack) :-
     print_message(warning,
                   ros(callback_failed(ros_ready(Type, Obj, CallBack)))).
 
+%!  ros_ready(+Type, +Object, :Callback)
+%
+%   Hookable predicate to deal with normal waitable objects. Its task is
+%   to retrieve information from the  ready   Object  and  call Callback
+%   using this information.
 
 ros_ready(subscription(_), Subscription, CallBack) :-
     ros_take(Subscription, Message, _MsgInfo),
