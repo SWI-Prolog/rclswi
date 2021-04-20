@@ -700,6 +700,9 @@ ros_shutdown(Context) :-
            '$ros_shutdown'(Context)).
 
 ros_shutdown_node(Node) :-
+    '$ros_node_shutdown'(Node),
+    ros_node_store(_, Node, _, _, Guard),
+    ros_trigger_guard_condition(Guard),
     forall(retract(waitable(Type, Node, Object, _CallBack)),
            shutdown_waitable(Type, Object)),
     retractall(ros_node_store(_, Node, _, _, _)),
@@ -707,6 +710,8 @@ ros_shutdown_node(Node) :-
 
 shutdown_waitable(subscription(_Topic), Object) :-
     '$ros_unsubscribe'(Object).
+shutdown_waitable(_Type, Object) :-
+    debug(ros(shutdown), 'Do not know how to shutdown ~p', [Object]).
 
 :- at_halt(ros_shutdown).
 

@@ -29,5 +29,6 @@ int	get_pointer_and_symbol(term_t t, void **ptr, atom_t *symbol,
 int	get_pointer_ex(term_t t, void **ptr, atom_t *symbol,
 		       const c_pointer_type **type);
 int	get_pointer_type(term_t t, void **ptr, const c_pointer_type **type);
+void   *get_pointer_from_symbol(atom_t symbol);
 
 #endif /*SWI_POINTER_H_INCLUDED*/

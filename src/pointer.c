@@ -45,6 +45,7 @@ release_c_ptr(atom_t aref)
 
   if ( ref->type->free )
     (*ref->type->free)((void*)ref->ptr);
+  free((void*)ref->ptr);
 
   return TRUE;
 }
@@ -155,4 +156,17 @@ get_pointer_type(term_t t, void **ptr, const c_pointer_type **type)
   }
 
   return FALSE;
+}
+
+void *
+get_pointer_from_symbol(atom_t symbol)
+{ c_ptr *ref;
+  PL_blob_t *btype;
+
+  if ( symbol &&
+       (ref=PL_blob_data(symbol, NULL, &btype)) &&
+       btype == &c_ptr_blob )
+    return (void*)ref->ptr;
+
+  return NULL;
 }
