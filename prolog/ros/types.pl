@@ -418,9 +418,15 @@ user:goal_expansion(ros_constant(Type, Constant, Var),
     (   Pairs = [_-Value]
     ->  true
     ;   Pairs == []
-    ->  existence_error(ros_constant(Type), Constant)
+    ->  print_message(warning,
+                      error(existence_error(ros_constant(Type), Constant),
+                            _)),
+        fail
     ;   pairs_keys(Pairs, Types),
-        throw(error(ambiguity_error(ros_constant(Constant), Types), _))
+        print_message(warning,
+                      error(ambiguity_error(ros_constant(Constant), Types),
+                            _)),
+        fail
     ).
 
 		 /*******************************
