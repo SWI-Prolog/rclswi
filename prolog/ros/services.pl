@@ -65,7 +65,8 @@ ros_client(ServiceName, SrvType, Client, Options) :-
 %       Do not wait beyond Stamp.  If `timeout` is also provided this
 %       option takes preference.
 %     - timeout(+Seconds)
-%       Do not wait more than Seconds.  This is translated to
+%       Do not wait more than Seconds.  This is translated to the
+%       deadline(Stamp) option.
 %     - service_info(-Info)
 %       If provided, Info is unified with the returned service info
 %       represented as a Prolog dict.
