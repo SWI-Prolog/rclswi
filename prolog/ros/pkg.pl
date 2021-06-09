@@ -14,9 +14,11 @@
 */
 
 :- module(ros_pkg,
-          [ ros_use_package/1
+          [ ros_use_package/1,                   % +Package
+            ros_package_share_directory/2	 % +Package, -Dir
           ]).
-:- use_module(library(ros)).
+:- use_module(library(ros), []).
+:- autoload(library(error), [domain_error/2]).
 
 %!  ros_use_package(+Package)
 %
@@ -34,5 +36,21 @@ ros_use_package(Package) :-
     !.
 ros_use_package(Package) :-
     ros_package_share_directory(Package, ShareDir),
-    format(atom(Dir), '~w/prolog/~w', [ShareDir, Package]),
-    asserta(user:file_search_path(Package, Dir)).
+    format(atom(Dir0), '~w/../../prolog/~w', [ShareDir, Package]),
+    absolute_file_name(Dir0, Dir),
+    (   exists_directory(Dir)
+    ->  asserta(user:file_search_path(Package, Dir))
+    ;   domain_error(ros_prolog_package, Package)
+    ).
+
+%!  ros_package_share_directory(+Package:text, -Dir:atom) is det.
+%
+%   True when Dir is  the  name  of   the  directory  where  Package  is
+%   installed.
+%
+%   @see Based on ``ament_index_cpp::get_package_share_directory()``
+%   @error existence_error(ros_package, Package)
+%   @bug Currently only handles ISO-Latin-1 package names.
+
+ros_package_share_directory(Package, Dir) :-
+    ros:ros_package_share_directory(Package, Dir).

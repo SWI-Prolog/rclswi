@@ -41,7 +41,6 @@
             ros_synchronized/2,         % +Object, :Goal
             ros_create_guard_condition/2,  % -Cond, +Options
             ros_trigger_guard_condition/1, % +Cond
-            ros_package_share_directory/2, % +Package, -Dir
             ros_debug/1                    % +Level
           ]).
 :- autoload(library(error),
@@ -1009,16 +1008,6 @@ ros_object(Object, Type) :-
 
 ros_property(rmw_identifier(Id)) :-
     ros_rwm_implementation(Id).
-
-
-%!  ros_package_share_directory(+Package:text, -Dir:atom) is det.
-%
-%   True when Dir is  the  name  of   the  directory  where  Package  is
-%   installed.
-%
-%   @see Based on ``ament_index_cpp::get_package_share_directory()``
-%   @error existence_error(ros_package, Package)
-%   @bug Currently only handles ISO-Latin-1 package names.
 
 
 %!  ros_debug(+Level)

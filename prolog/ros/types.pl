@@ -19,7 +19,7 @@
             ros_import_type/1,          % :Type
             ros_constant/3              % :Type,?Constant,?Value
           ]).
-:- use_module(library(ros),
+:- use_module(library(ros/pkg),
               [ ros_package_share_directory/2
               ]).
 :- use_module(library(dcg/basics)).
