@@ -84,6 +84,7 @@ install(FILES prolog/ros/logging.pl
 	      prolog/ros/graph.pl
 	      prolog/ros/types.pl
 	      prolog/ros/debug.pl
+	      prolog/ros/pkg.pl
   DESTINATION prolog/ros
 )
 install(FILES prolog/ros/action/server.pl
