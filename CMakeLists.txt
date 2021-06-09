@@ -83,6 +83,7 @@ install(FILES prolog/ros/logging.pl
 	      prolog/ros/qos.pl
 	      prolog/ros/graph.pl
 	      prolog/ros/types.pl
+	      prolog/ros/debug.pl
   DESTINATION prolog/ros
 )
 install(FILES prolog/ros/action/server.pl
@@ -98,6 +99,9 @@ install(FILES prolog/ros/detail/options.pl
 	      prolog/ros/detail/param.pl
 	      prolog/ros/detail/actions.pl
   DESTINATION prolog/ros/detail
+)
+install(FILES prolog/util/teleop.pl
+  DESTINATION prolog/util
 )
 
 ament_package()
