@@ -1,0 +1,3 @@
+#!/usr/bin/env swipl
+
+:- ['../../prolog/squirrel_world/main'].
