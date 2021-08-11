@@ -88,6 +88,7 @@ static atom_t ATOM_namespace;
 static atom_t ATOM_node;
 static atom_t ATOM_node_parameters;
 static atom_t ATOM_parameters;
+static atom_t ATOM_qname;
 static atom_t ATOM_received_timestamp;
 static atom_t ATOM_request;
 static atom_t ATOM_request_id;
@@ -752,6 +753,10 @@ ros_node_prop(term_t Node, term_t Prop, term_t Value)
   { const char *namespace = rcl_node_get_namespace(&node->node);
     if ( namespace )
       return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, namespace);
+  } else if ( prop == ATOM_qname )
+  { const char *qname = rcl_node_get_fully_qualified_name(&node->node);
+    if ( qname )
+      return PL_unify_chars(Value, PL_ATOM|REP_UTF8, (size_t)-1, qname);
   } else if ( prop == ATOM_logger_name )
   { const char *logger_name = rcl_node_get_logger_name(&node->node);
     if ( logger_name )
@@ -4662,6 +4667,7 @@ install_librclswi(void)
   MKATOM(node);
   MKATOM(node_parameters);
   MKATOM(parameters);
+  MKATOM(qname);
   MKATOM(received_timestamp);
   MKATOM(request);
   MKATOM(request_id);

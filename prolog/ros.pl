@@ -784,9 +784,7 @@ ros_property_node(name(Name), Node) :-
 ros_property_node(namespace(Name), Node) :-
     '$ros_node_prop'(Node, namespace, Name).
 ros_property_node(qname(QName), Node) :-
-    '$ros_node_prop'(Node, name, Name),
-    '$ros_node_prop'(Node, namespace, NameSpace),
-    format(atom(QName), '~w~w', [NameSpace, Name]).
+    '$ros_node_prop'(Node, qname, QName).
 ros_property_node(logger_name(Name), Node) :-
     '$ros_node_prop'(Node, logger_name, Name).
 ros_property_node(clock(Clock), Node) :-

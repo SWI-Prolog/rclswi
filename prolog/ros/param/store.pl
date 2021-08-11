@@ -297,31 +297,31 @@ import_parameters(Node, Options) :-
     import_parameters(Node, local, Options).
 
 import_parameters(Node, Scope, Options) :-
-    ros:ros_get_node_parameters(Node, Scope, Parms),
+    ros:ros_get_node_parameters(Node, Scope, NodeParams),
     node_id(Node, NodeID),
-    maplist(import_params(NodeID, [node(Node)|Options]), Parms).
-
-import_params(NodeID, Options, Dict) :-
-    _{ node:Pattern, parameters:Pdict } :< Dict,
-    matches(Pattern, NodeID, Options),
-    !,
-    dict_pairs(Pdict, _, Pairs),
+    % Filter NodeParams down to elements that apply to Node:
+    % wildcard matches first then exact matches so that exact
+    % matches override wildcards during merge
+    include(node_matches('/**'), NodeParams, WildcardParams),
+    include(node_matches(NodeID), NodeParams, ExactParams),
+    append(WildcardParams, ExactParams, NodeParams1),
+    maplist(get_dict(parameters), NodeParams1, ParamsList),
+    foldl(put_dict, ParamsList, _{}, MergedParams),
+    dict_pairs(MergedParams, _, Pairs),
     maplist(import_param(Options), Pairs).
 
-%!  matches(+Pattern, +Node, +Options) is semidet.
-%
-%   Should do pattern matching. Not sure how these node patterns work.
-
-matches(Node, Node, _) :- !.
-matches('/**', _, _) :- !.
-matches(Pattern, Node, _) :-
-    atom_concat(/, Node, Pattern).
+node_matches(NodeID, Dict) :-
+    _{ node:NodeID } :< Dict,
+    !.
+node_matches(NodeID, Dict) :-
+    _{ node:BareNodeID } :< Dict,
+    atom_concat(/, BareNodeID, NodeID).
 
 import_param(Options, Name-Value) :-
     ros_set_param(Name, Value, Options).
 
 node_id(Node, Id), atom(Node) => Id = Node.
-node_id(Node, Id) => ros_node_property(Node, name(Id)).
+node_id(Node, Id) => ros_node_property(Node, qname(Id)).
 node_id(Node, _) => type_error(ros_node, Node).
 
 %!  ros_publish_parameter_events(+Node) is det.
