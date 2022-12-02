@@ -13,7 +13,7 @@
 #  license.
 
 if(NOT (LIBSWIPL_INCLUDE_DIR AND LIBSWIPL_LIBRARY))
-  find_package(PkgConfig)
+  find_package(PkgConfig REQUIRED)
   pkg_check_modules(PC_LIBSWIPL QUIET swipl)
 
   find_program(
@@ -54,6 +54,7 @@ if(NOT (LIBSWIPL_INCLUDE_DIR AND LIBSWIPL_LIBRARY))
       swipl
       libswipl
     PATHS
+      ${SWIPL_BASE}/../
       ${SWIPL_BASE}/lib/${SWIPL_ARCH}
       ${SWIPL_BINARY_DIR}/src
       /usr/lib
