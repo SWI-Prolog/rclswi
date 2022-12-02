@@ -966,9 +966,6 @@ func_package(Func, Package) :-
     sub_atom(Func, 0, Pre, _, Package).
 
 load_type_support(Package) :-
-    rwm_c_identifier(Id),
-    atom_concat(rosidl_typesupport_, Id, WM_TypeSupport),
-    load_type_support_shared_object(Package, WM_TypeSupport, _),
     load_type_support_shared_object(Package, rosidl_typesupport_c, _),
     load_type_support_shared_object(Package, rosidl_generator_c, _),
     load_type_support_shared_object(Package, rosidl_typesupport_introspection_c, _).

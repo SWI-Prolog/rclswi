@@ -623,7 +623,7 @@ free_rcl_node(void* ptr)
 static foreign_t
 ros_create_node(term_t Context, term_t Name, term_t Node, term_t Options)
 { rcl_context_t *context;
-  rclswi_node_t *node;
+  rclswi_node_t *node = NULL;
   rcl_node_options_t options = rcl_node_get_default_options();
   rcl_arguments_t arguments = rcl_get_zero_initialized_arguments();
   int use_global_arguments = TRUE;
@@ -1545,7 +1545,7 @@ free_rcl_clock(void *ptr)
 static foreign_t
 ros_create_clock(term_t Context, term_t Type, term_t Clock)
 { rcl_context_t *context;
-  rcl_clock_type_t type;
+  rcl_clock_type_t type = RCL_ROS_TIME;
   int rc = TRUE;
   atom_t type_a;
   atom_t context_symbol;
